@@ -336,7 +336,7 @@ int main(int argc, char **argv) {
             std::fflush(stderr);
         }
         XFlush(display);
-        if (mode != "pattern" && capture.done) {
+        if (running && mode != "pattern" && capture.done) {
             std::fprintf(stderr, "Game capture stopped. Check GStreamer errors above.\n");
             result = 7;
             break;
