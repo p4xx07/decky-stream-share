@@ -41,6 +41,19 @@ class BackendTest(unittest.TestCase):
 
             asyncio.run(check())
 
+    def test_extracted_helper_can_be_made_executable(self):
+        decky = types.SimpleNamespace(logger=logging.getLogger("probe-test"))
+        with patch.dict(sys.modules, {"decky": decky}):
+            spec = importlib.util.spec_from_file_location("stream_share_probe_chmod", Path(__file__).parents[1] / "main.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as root:
+            helper = Path(root) / "stream-share-probe"
+            helper.write_bytes(b"test")
+            helper.chmod(0o644)
+            module.ensure_helper_executable(helper)
+            self.assertTrue(os.access(helper, os.X_OK))
+
 
 if __name__ == "__main__":
     unittest.main()

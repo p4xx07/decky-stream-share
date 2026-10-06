@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,18 @@ def external_program_env() -> dict[str, str]:
         env.pop("LD_LIBRARY_PATH", None)
     env["DISPLAY"] = ":0"
     return env
+
+
+def ensure_helper_executable(helper: Path) -> None:
+    if not helper.is_file():
+        raise RuntimeError("Probe binary is missing from this plugin ZIP")
+    if not os.access(helper, os.X_OK):
+        try:
+            helper.chmod(stat.S_IMODE(helper.stat().st_mode) | stat.S_IXUSR)
+        except OSError as exc:
+            raise RuntimeError("Probe binary could not be made executable") from exc
+    if not os.access(helper, os.X_OK):
+        raise RuntimeError("Probe binary is not executable")
 
 
 class Plugin:
@@ -39,8 +52,7 @@ class Plugin:
         if self.process and self.process.poll() is None:
             raise RuntimeError("A display test is already running")
         helper = Path(__file__).resolve().parent / "bin" / "stream-share-probe"
-        if not helper.is_file() or not os.access(helper, os.X_OK):
-            raise RuntimeError("Probe binary is missing from this plugin ZIP")
+        ensure_helper_executable(helper)
         if mode == "live" and not shutil.which("gst-launch-1.0"):
             raise RuntimeError("GStreamer is unavailable on this SteamOS installation")
         if self.log_handle:
