@@ -94,20 +94,44 @@ const layouts = ["side", "wide", "stack"];
 const layoutNames = {
     side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
 };
+async function within(promise, milliseconds, message) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    }
+    finally {
+        if (timer !== undefined)
+            window.clearTimeout(timer);
+    }
+}
+function errorMessage(caught) {
+    return caught instanceof Error ? caught.message : String(caught);
+}
 function Content() {
     const [status, setStatus] = SP_REACT.useState(null);
     const [busy, setBusy] = SP_REACT.useState(false);
     const [error, setError] = SP_REACT.useState("");
+    const [roomError, setRoomError] = SP_REACT.useState("");
+    const [connecting, setConnecting] = SP_REACT.useState(false);
     const [relayUrl, setRelayUrl] = SP_REACT.useState("");
     const [joinCode, setJoinCode] = SP_REACT.useState("");
     const relayLoaded = SP_REACT.useRef(false);
     SP_REACT.useEffect(() => {
         let active = true;
+        let refreshing = false;
         const refresh = async () => {
+            if (refreshing)
+                return;
+            refreshing = true;
             try {
-                const next = await getStatus();
+                const next = await within(getStatus(), 6000, "Decky backend did not respond. Reinstall the latest Stream Share ZIP and reopen Decky.");
                 if (active) {
                     setStatus(next);
+                    if (next.room_connected)
+                        setRoomError("");
                     if (!relayLoaded.current) {
                         setRelayUrl(next.relay_url);
                         relayLoaded.current = true;
@@ -116,7 +140,10 @@ function Content() {
             }
             catch (caught) {
                 if (active)
-                    setError(String(caught));
+                    setRoomError(errorMessage(caught));
+            }
+            finally {
+                refreshing = false;
             }
         };
         void refresh();
@@ -165,25 +192,27 @@ function Content() {
     };
     const connectRoom = async (code) => {
         setBusy(true);
-        setError("");
+        setConnecting(true);
+        setRoomError("");
         try {
-            setStatus(await startRoom(relayUrl, code));
+            setStatus(await within(startRoom(relayUrl, code), 15000, "Decky backend did not answer within 15 seconds. Reinstall the latest Stream Share ZIP and reopen Decky."));
         }
         catch (caught) {
-            setError(String(caught));
+            setRoomError(errorMessage(caught));
         }
         finally {
+            setConnecting(false);
             setBusy(false);
         }
     };
     const disconnectRoom = async () => {
         setBusy(true);
-        setError("");
+        setRoomError("");
         try {
             setStatus(await stopRoom());
         }
         catch (caught) {
-            setError(String(caught));
+            setRoomError(errorMessage(caught));
         }
         finally {
             setBusy(false);
@@ -204,7 +233,7 @@ function Content() {
             setBusy(false);
         }
     };
-    return SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Stream Share", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "Start a game, connect both Decks to a room, then start split view. Your complete game fits in its pane beside your friend's game." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void changeLayout(), children: ["Layout: ", layoutNames[status?.layout || "side"], " (change)"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Start split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), status?.capture_diagnostic && SP_JSX.jsx(DFL.PanelSectionRow, { children: status.capture_diagnostic }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PC relay", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "PC relay URL", value: relayUrl, onChange: event => setRelayUrl(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "Friend's room code", value: joinCode, onChange: event => setJoinCode(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected, onClick: () => void connectRoom(""), children: "Create room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected || !joinCode.trim(), onClick: () => void connectRoom(joinCode), children: "Join room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.room_connected, onClick: () => void disconnectRoom(), children: "Leave room" }) }), status?.room_code && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Room code: ", status.room_code] }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.relay_message || "Not connected" }), !!status?.room_connected && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Video frames: sent ", status.sent_frames, ", received ", status.received_frames] }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("microphone"), children: ["Microphone: ", status.microphone_enabled ? "On" : "Off"] }) }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("speaker"), children: ["Friend audio: ", status.speaker_enabled ? "On" : "Off"] }) })] })] });
+    return SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Stream Share", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "Start a game, connect both Decks to a room, then start split view. Your complete game fits in its pane beside your friend's game." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void changeLayout(), children: ["Layout: ", layoutNames[status?.layout || "side"], " (change)"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Start split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), status?.capture_diagnostic && SP_JSX.jsx(DFL.PanelSectionRow, { children: status.capture_diagnostic }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PC relay", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "PC relay URL", value: relayUrl, onChange: event => { relayLoaded.current = true; setRelayUrl(event.target.value); } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "Friend's room code", value: joinCode, onChange: event => setJoinCode(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected, onClick: () => void connectRoom(""), children: "Create room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected || !joinCode.trim(), onClick: () => void connectRoom(joinCode), children: "Join room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.room_connected, onClick: () => void disconnectRoom(), children: "Leave room" }) }), status?.room_code && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Room code: ", status.room_code] }), SP_JSX.jsx(DFL.PanelSectionRow, { children: connecting ? "Connecting to PC relay…" : (status?.relay_message || "Not connected") }), roomError && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { color: "#ffb4a9", overflowWrap: "anywhere" }, children: ["Error: ", roomError] }) }), !!status?.room_connected && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Video frames: sent ", status.sent_frames, ", received ", status.received_frames] }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("microphone"), children: ["Microphone: ", status.microphone_enabled ? "On" : "Off"] }) }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("speaker"), children: ["Friend audio: ", status.speaker_enabled ? "On" : "Off"] }) })] })] });
 }
 var index = definePlugin(() => ({
     name: "Stream Share",

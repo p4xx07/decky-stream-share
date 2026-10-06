@@ -70,6 +70,7 @@ def create_app() -> web.Application:
         )
 
     async def socket(request: web.Request) -> web.WebSocketResponse:
+        print(f"WebSocket attempt from {request.remote}", flush=True)
         ws = web.WebSocketResponse(max_msg_size=MAX_MEDIA_BYTES + 1, heartbeat=20)
         await ws.prepare(request)
         room: Room | None = None
@@ -95,6 +96,7 @@ def create_app() -> web.Application:
                 peer = Peer(ws)
                 room = Room(code, peer, time.monotonic())
                 rooms[code] = room
+                print(f"Room created from {request.remote}", flush=True)
                 peer.queue("json", {"type": "room", "code": code, "role": "host"})
             elif action == "join":
                 code = str(first.get("code", "")).strip().upper()
@@ -105,6 +107,7 @@ def create_app() -> web.Application:
                     return ws
                 peer = Peer(ws)
                 room.guest = peer
+                print(f"Peer joined from {request.remote}", flush=True)
                 peer.queue("json", {"type": "room", "code": code, "role": "guest"})
                 peer.queue("json", {"type": "peer_joined"})
                 room.host.queue("json", {"type": "peer_joined"})

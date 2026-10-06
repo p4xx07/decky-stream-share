@@ -25,26 +25,45 @@ const layoutNames: Record<Layout, string> = {
   side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
 };
 
+async function within<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  let timer: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+  });
+  try { return await Promise.race([promise, timeout]); }
+  finally { if (timer !== undefined) window.clearTimeout(timer); }
+}
+
+function errorMessage(caught: unknown): string {
+  return caught instanceof Error ? caught.message : String(caught);
+}
+
 function Content() {
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [roomError, setRoomError] = useState("");
+  const [connecting, setConnecting] = useState(false);
   const [relayUrl, setRelayUrl] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const relayLoaded = useRef(false);
 
   useEffect(() => {
     let active = true;
+    let refreshing = false;
     const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
       try {
-        const next = await getStatus();
+        const next = await within(getStatus(), 6000, "Decky backend did not respond. Reinstall the latest Stream Share ZIP and reopen Decky.");
         if (active) {
           setStatus(next);
+          if (next.room_connected) setRoomError("");
           if (!relayLoaded.current) { setRelayUrl(next.relay_url); relayLoaded.current = true; }
         }
       } catch (caught) {
-        if (active) setError(String(caught));
-      }
+        if (active) setRoomError(errorMessage(caught));
+      } finally { refreshing = false; }
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 2000);
@@ -79,17 +98,20 @@ function Content() {
 
   const connectRoom = async (code: string) => {
     setBusy(true);
-    setError("");
-    try { setStatus(await startRoom(relayUrl, code)); }
-    catch (caught) { setError(String(caught)); }
-    finally { setBusy(false); }
+    setConnecting(true);
+    setRoomError("");
+    try {
+      setStatus(await within(startRoom(relayUrl, code), 15000,
+        "Decky backend did not answer within 15 seconds. Reinstall the latest Stream Share ZIP and reopen Decky."));
+    } catch (caught) { setRoomError(errorMessage(caught)); }
+    finally { setConnecting(false); setBusy(false); }
   };
 
   const disconnectRoom = async () => {
     setBusy(true);
-    setError("");
+    setRoomError("");
     try { setStatus(await stopRoom()); }
-    catch (caught) { setError(String(caught)); }
+    catch (caught) { setRoomError(errorMessage(caught)); }
     finally { setBusy(false); }
   };
 
@@ -117,13 +139,14 @@ function Content() {
       {status?.log && <PanelSectionRow><div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{status.log}</div></PanelSectionRow>}
     </PanelSection>
     <PanelSection title="PC relay">
-      <PanelSectionRow><TextField label="PC relay URL" value={relayUrl} onChange={event => setRelayUrl(event.target.value)} /></PanelSectionRow>
+      <PanelSectionRow><TextField label="PC relay URL" value={relayUrl} onChange={event => { relayLoaded.current = true; setRelayUrl(event.target.value); }} /></PanelSectionRow>
       <PanelSectionRow><TextField label="Friend's room code" value={joinCode} onChange={event => setJoinCode(event.target.value)} /></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.room_connected} onClick={() => void connectRoom("")}>Create room</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.room_connected || !joinCode.trim()} onClick={() => void connectRoom(joinCode)}>Join room</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !status?.room_connected} onClick={() => void disconnectRoom()}>Leave room</ButtonItem></PanelSectionRow>
       {status?.room_code && <PanelSectionRow>Room code: {status.room_code}</PanelSectionRow>}
-      <PanelSectionRow>{status?.relay_message || "Not connected"}</PanelSectionRow>
+      <PanelSectionRow>{connecting ? "Connecting to PC relay…" : (status?.relay_message || "Not connected")}</PanelSectionRow>
+      {roomError && <PanelSectionRow><div style={{ color: "#ffb4a9", overflowWrap: "anywhere" }}>Error: {roomError}</div></PanelSectionRow>}
       {!!status?.room_connected && <PanelSectionRow>Video frames: sent {status.sent_frames}, received {status.received_frames}</PanelSectionRow>}
       {!!status?.room_connected && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void toggleAudio("microphone")}>Microphone: {status.microphone_enabled ? "On" : "Off"}</ButtonItem></PanelSectionRow>}
       {!!status?.room_connected && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void toggleAudio("speaker")}>Friend audio: {status.speaker_enabled ? "On" : "Off"}</ButtonItem></PanelSectionRow>}

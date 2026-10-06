@@ -81,9 +81,18 @@ class Plugin:
         self.connection = await RelayConnection.open(
             relay_url, join_code.strip().upper(), self._receive_media
         )
-        self.audio = AudioBridge(self.runtime_dir, external_program_env(), self._send_audio)
+        try:
+            self.audio = AudioBridge(self.runtime_dir, external_program_env(), self._send_audio)
+        except Exception:
+            await self.connection.close()
+            self.connection = None
+            raise
         self.relay_url = relay_url.strip()
-        self.relay_url_path.write_text(self.relay_url, encoding="utf-8")
+        try:
+            self.relay_url_path.write_text(self.relay_url, encoding="utf-8")
+        except OSError:
+            # A settings write failure must not hide an established room.
+            pass
         return await self.get_status()
 
     async def stop_room(self):

@@ -6,8 +6,9 @@ This alpha sends JPEG video (about 640×400, at most 10 fps) and Opus microphone
 
 ## Install and try
 
-1. On a Windows, macOS, or Linux PC, download and unzip `StreamShareRelay-0.1.0-alpha.2.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
-2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. Install `StreamShare-0.1.0-alpha.2.zip` using Decky settings → Developer → Install Plugin from URL or ZIP.
+1. On a Windows, macOS, or Linux PC, download and unzip `StreamShareRelay-0.1.0-alpha.3.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
+2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. Install `StreamShare-0.1.0-alpha.3.zip` using Decky settings → Developer → Install Plugin from URL or ZIP.
+   If alpha 1 or alpha 2 showed gray buttons without a reply, replace it with alpha 3; the earlier ZIPs placed Python modules outside Decky's import path.
 3. Start a game on each Deck. In the plugin, enter the **same relay URL**. On one Deck choose **Create room** and tell your friend the displayed code. On the other choose **Join room** with that code.
 4. Choose a layout, press **Start split view** on both Decks, and return to the games. Enable microphone and friend audio separately if wanted. Use **Stop split view** and **Leave room** when finished.
 

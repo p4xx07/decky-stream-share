@@ -56,16 +56,19 @@ class RelayConnection:
         session = ClientSession()
         try:
             ws = await asyncio.wait_for(
-                session.ws_connect(endpoint, heartbeat=20, max_msg_size=512 * 1024 + 1), 8
+                session.ws_connect(endpoint, heartbeat=20, max_msg_size=512 * 1024 + 1), 6
             )
             await ws.send_json({"type": "join", "code": code} if code else {"type": "create"})
-            first = await ws.receive(timeout=8)
+            first = await ws.receive(timeout=6)
             if first.type != WSMsgType.TEXT:
                 raise RuntimeError("Relay did not return a room")
             reply = json.loads(first.data)
             if reply.get("type") != "room":
                 raise RuntimeError(str(reply.get("message", "Relay rejected the room")))
             return cls(session, ws, str(reply["code"]), str(reply["role"]), on_media)
+        except asyncio.TimeoutError as exc:
+            await session.close()
+            raise RuntimeError("PC relay did not answer within 12 seconds. Check its URL and Wi-Fi.") from exc
         except Exception:
             await session.close()
             raise

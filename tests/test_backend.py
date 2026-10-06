@@ -44,6 +44,7 @@ class BackendTest(unittest.TestCase):
 
             asyncio.run(check())
 
+
     def test_extracted_helper_can_be_made_executable(self):
         decky = types.SimpleNamespace(logger=logging.getLogger("probe-test"))
         with patch.dict(sys.modules, {"decky": decky}):
@@ -76,6 +77,42 @@ class BackendTest(unittest.TestCase):
                 self.assertEqual((await plugin.set_layout("stack"))["layout"], "stack")
 
             asyncio.run(check())
+
+
+class BackendRoomTest(unittest.IsolatedAsyncioTestCase):
+    async def test_room_starts_even_if_url_setting_cannot_be_saved(self):
+        from aiohttp import web
+        from relay.server import create_app
+
+        runner = web.AppRunner(create_app())
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                decky = types.SimpleNamespace(
+                    DECKY_PLUGIN_RUNTIME_DIR=root,
+                    DECKY_PLUGIN_SETTINGS_DIR=root,
+                    logger=logging.getLogger("stream-share-room-test"),
+                )
+                with patch.dict(sys.modules, {"decky": decky}):
+                    spec = importlib.util.spec_from_file_location(
+                        "stream_share_room_test", Path(__file__).parents[1] / "main.py"
+                    )
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                plugin = module.Plugin()
+                await plugin._main()
+                try:
+                    with patch.object(Path, "write_text", side_effect=OSError("read-only settings")):
+                        status = await plugin.start_room(f"http://127.0.0.1:{port}")
+                    self.assertTrue(status["room_connected"])
+                    self.assertEqual(len(status["room_code"]), 10)
+                finally:
+                    await plugin.stop_room()
+        finally:
+            await runner.cleanup()
 
 
 if __name__ == "__main__":
