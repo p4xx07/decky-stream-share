@@ -33,12 +33,13 @@ jobs:
           docker build -f backend/Dockerfile -t stream-share-build .
           docker run --rm -v "$PWD":/work -w /work stream-share-build sh backend/build.sh
       - run: python3 package_plugin.py
-      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.3.zip
-      - run: unzip -t StreamShare-0.1.0-alpha.3.zip
-      - run: unzip -t StreamShareRelay-0.1.0-alpha.3.zip
+      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.4.zip
+      - run: python3 tests/relay_package_smoke.py StreamShareRelay-0.1.0-alpha.4.zip StreamShare-0.1.0-alpha.4.zip
+      - run: unzip -t StreamShare-0.1.0-alpha.4.zip
+      - run: unzip -t StreamShareRelay-0.1.0-alpha.4.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StreamShare-0.1.0-alpha.3
+          name: StreamShare-0.1.0-alpha.4
           path: |
-            StreamShare-0.1.0-alpha.3.zip
-            StreamShareRelay-0.1.0-alpha.3.zip
+            StreamShare-0.1.0-alpha.4.zip
+            StreamShareRelay-0.1.0-alpha.4.zip

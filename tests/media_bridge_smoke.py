@@ -42,14 +42,15 @@ def main():
                 jpeg = read_exact(connection, length)
                 assert jpeg.startswith(b"\xff\xd8") and jpeg.endswith(b"\xff\xd9")
                 connection.sendall(header + jpeg)
-                time.sleep(1)
+                time.sleep(2)
         finally:
             process.terminate()
             _, errors = process.communicate(timeout=5)
             listener.close()
         assert process.returncode == 0, errors
         assert "Received 1 friend frames" in errors, errors
-        print("JPEG bridge sent and received a friend frame")
+        assert "Displayed 10 local game frames" in errors, errors
+        print("JPEG bridge sent and received a friend frame; local frames remained visible")
 
 
 if __name__ == "__main__":

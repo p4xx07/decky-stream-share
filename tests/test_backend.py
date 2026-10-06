@@ -108,7 +108,7 @@ class BackendRoomTest(unittest.IsolatedAsyncioTestCase):
                     with patch.object(Path, "write_text", side_effect=OSError("read-only settings")):
                         status = await plugin.start_room(f"http://127.0.0.1:{port}")
                     self.assertTrue(status["room_connected"])
-                    self.assertEqual(len(status["room_code"]), 10)
+                    self.assertEqual(len(status["room_code"]), 6)
                 finally:
                     await plugin.stop_room()
         finally:

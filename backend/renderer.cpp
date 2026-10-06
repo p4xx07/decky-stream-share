@@ -93,7 +93,10 @@ bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
             if (bridge) bridge->submit(frame);
             {
                 std::lock_guard<std::mutex> lock(capture.mutex);
-                capture.latest.swap(frame);
+                // Keep the read buffer allocated for the next full frame. Swapping
+                // leaves it empty, so the next read appears to succeed immediately
+                // and clears the local image before the display loop can use it.
+                capture.latest = frame;
             }
             unsigned long count = ++capture.frames;
             if (count == 1 || count % 75 == 0) {
@@ -301,6 +304,7 @@ int main(int argc, char **argv) {
                  mode.c_str(), layout.c_str(), width, height);
     std::fflush(stderr);
     int result = 0;
+    unsigned long displayed_local_frames = 0;
     const auto started = std::chrono::steady_clock::now();
     const auto limit = mode == "pattern" ? std::chrono::seconds(45) :
                        (ipc_path.empty() ? std::chrono::seconds(90) : std::chrono::hours(4));
@@ -317,6 +321,10 @@ int main(int argc, char **argv) {
         const std::vector<unsigned char> remote = bridge.remote_frame();
         render(image, frame, remote, mode == "pattern", game, friend_view);
         XPutImage(display, window, gc, image, 0, 0, 0, 0, width, height);
+        if (!frame.empty() && ++displayed_local_frames == 10) {
+            std::fprintf(stderr, "Displayed 10 local game frames.\n");
+            std::fflush(stderr);
+        }
         XSetForeground(display, gc, WhitePixel(display, screen));
         const char *friend_label = remote.empty() ? "FRIEND VIDEO GOES HERE" : "FRIEND GAME";
         const char *local_label = mode == "pattern" ? "DISPLAY TEST" :

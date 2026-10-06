@@ -28,7 +28,8 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         await host.send_json({"type": "create"})
         room = await host.receive_json(timeout=1)
         self.assertEqual(room["role"], "host")
-        self.assertEqual(len(room["code"]), 10)
+        self.assertEqual(len(room["code"]), 6)
+        self.assertRegex(room["code"], r"^[A-HJ-NP-Z2-9]{6}$")
 
         guest = await self.connect()
         await guest.send_json({"type": "join", "code": room["code"]})

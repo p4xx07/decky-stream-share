@@ -25,7 +25,7 @@
   <h1>Stream Share — Computer Client</h1>
   <p>Use this computer as the second player. Create a room here and join its code on the Deck, or enter a code created on the Deck. The PC relay stays running in the background.</p>
   <div class="controls">
-    <input id="codeInput" aria-label="Deck room code" placeholder="Deck room code" maxlength="10" autocomplete="off" spellcheck="false">
+    <input id="codeInput" aria-label="Deck room code" placeholder="Deck room code" maxlength="6" autocomplete="off" spellcheck="false">
     <button id="join">Join Deck room</button>
     <button id="create" class="secondary">Create room here</button>
     <button id="leave" class="secondary" disabled>Leave room</button>
@@ -93,8 +93,8 @@
     }
     function connect(action) {
       const code = $('codeInput').value.trim().toUpperCase();
-      if (action === 'join' && !/^[A-Z2-9]{10}$/.test(code)) {
-        status('Enter the 10-character code shown on the Deck.');
+      if (action === 'join' && !/^[A-HJ-NP-Z2-9]{6}$/.test(code)) {
+        status('Enter the 6-character code shown on the Deck.');
         return;
       }
       leave();

@@ -18,6 +18,8 @@ python3 server.py
 
 The relay listens at `http://127.0.0.1:57322`. Keep that terminal running.
 
+The relay ZIP also contains `d.zip`, the matching Deck plugin. On the Deck, use Decky settings → Developer → Install Plugin from URL with `http://<PC-LAN-IP>:57322/d.zip` when both devices are on the same LAN.
+
 **Test with one Deck and this computer:** open `http://127.0.0.1:57322/client` in a browser on the computer. Create a room on the Deck, enter its code on the browser page, press **Join Deck room**, then **Send test image**. Start split view on the Deck. The Deck's game appears in the browser and the test image appears on the Deck. **Share Mac screen** can send your computer screen instead. Browser microphone audio is not implemented yet.
 
 For Decks on different home networks, install `cloudflared` on the PC and run this in a second terminal:

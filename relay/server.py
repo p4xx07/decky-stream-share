@@ -69,6 +69,12 @@ def create_app() -> web.Application:
             headers={"Cache-Control": "no-store"},
         )
 
+    async def deck_plugin(_request: web.Request) -> web.FileResponse:
+        return web.FileResponse(
+            Path(__file__).with_name("d.zip"),
+            headers={"Cache-Control": "no-store"},
+        )
+
     async def socket(request: web.Request) -> web.WebSocketResponse:
         print(f"WebSocket attempt from {request.remote}", flush=True)
         ws = web.WebSocketResponse(max_msg_size=MAX_MEDIA_BYTES + 1, heartbeat=20)
@@ -92,7 +98,7 @@ def create_app() -> web.Application:
                     return ws
                 code = ""
                 while not code or code in rooms:
-                    code = "".join(secrets.choice(ALPHABET) for _ in range(10))
+                    code = "".join(secrets.choice(ALPHABET) for _ in range(6))
                 peer = Peer(ws)
                 room = Room(code, peer, time.monotonic())
                 rooms[code] = room
@@ -154,6 +160,7 @@ def create_app() -> web.Application:
 
     app.router.add_get("/health", health)
     app.router.add_get("/client", browser_client)
+    app.router.add_get("/d.zip", deck_plugin)
     app.router.add_get("/ws", socket)
     return app
 
