@@ -23,14 +23,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxext-dev xvfb gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
           sh backend/build.sh
-          xvfb-run -a sh -c './bin/stream-share-probe --mode synthetic > /tmp/stream-share-probe.log 2>&1 & probe_pid=$!; sleep 4; kill "$probe_pid"; wait "$probe_pid"; grep -q "Captured" /tmp/stream-share-probe.log'
+          xvfb-run -a sh -c 'set -eu; for layout in side wide stack; do ./bin/stream-share-probe --mode synthetic --layout "$layout" > "/tmp/stream-share-probe-$layout.log" 2>&1 & probe_pid=$!; sleep 3; kill "$probe_pid"; wait "$probe_pid"; grep -q "Captured" "/tmp/stream-share-probe-$layout.log"; done'
       - name: Build SteamOS helper
         run: |
           docker build -f backend/Dockerfile -t stream-share-probe-build .
           docker run --rm -v "$PWD":/work -w /work stream-share-probe-build sh backend/build.sh
       - run: python3 package_plugin.py
-      - run: unzip -t StreamShareProbe-0.0.2.zip
+      - run: unzip -t StreamShareProbe-0.0.3.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StreamShareProbe-0.0.2
-          path: StreamShareProbe-0.0.2.zip
+          name: StreamShareProbe-0.0.3
+          path: StreamShareProbe-0.0.3.zip

@@ -3,10 +3,16 @@ import { ButtonItem, PanelSection, PanelSectionRow, staticClasses } from "@decky
 import { useEffect, useState } from "react";
 import { FaDesktop } from "react-icons/fa";
 
-type ProbeStatus = { running: boolean; mode: string; message: string; log: string };
+type Layout = "side" | "wide" | "stack";
+type ProbeStatus = { running: boolean; mode: string; layout: Layout; message: string; log: string };
 const getStatus = callable<[], ProbeStatus>("get_status");
 const startProbe = callable<[mode: string], ProbeStatus>("start_probe");
 const stopProbe = callable<[], ProbeStatus>("stop_probe");
+const setProbeLayout = callable<[layout: Layout], ProbeStatus>("set_layout");
+const layouts: Layout[] = ["side", "wide", "stack"];
+const layoutNames: Record<Layout, string> = {
+  side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
+};
 
 function Content() {
   const [status, setStatus] = useState<ProbeStatus | null>(null);
@@ -43,9 +49,21 @@ function Content() {
     finally { setBusy(false); }
   };
 
+  const changeLayout = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const current = status?.layout || "side";
+      const next = layouts[(layouts.indexOf(current) + 1) % layouts.length];
+      setStatus(await setProbeLayout(next));
+    } catch (caught) { setError(String(caught)); }
+    finally { setBusy(false); }
+  };
+
   return <>
     <PanelSection title="Split-view feasibility test">
-      <PanelSectionRow>Start a game, then run Live game view. Your complete game should appear on the left; the right side is a test pattern. This does not connect to a friend yet.</PanelSectionRow>
+      <PanelSectionRow>Start a game, then run Live game view. Your complete game should fit in its pane; the other pane is a test pattern. This does not connect to a friend yet.</PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void changeLayout()}>Layout: {layoutNames[status?.layout || "side"]} (change)</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("pattern")}>Check display layer</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("live")}>Live game view</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !status?.running} onClick={() => void stop()}>Stop test</ButtonItem></PanelSectionRow>

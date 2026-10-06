@@ -1,12 +1,12 @@
 # Stream Share Probe
 
-This is a **display feasibility test**, not the finished friend-streaming plugin. It has no networking or microphone yet. In Gaming Mode it tries to show your entire running game, scaled into the left half, beside a right-hand test pane. It does not change SteamOS settings, install system packages, or request root access.
+This is a **display feasibility test**, not the finished friend-streaming plugin. It has no networking or microphone yet. In Gaming Mode it tries to show your entire running game, scaled into a local pane beside a test pane. Equal side-by-side, larger-local, and top/bottom layouts keep the full game frame visible. It does not change SteamOS settings, install system packages, or request root access.
 
 ## Test on a Steam Deck
 
-1. Install the experimental `StreamShareProbe-0.0.2.zip` through Decky settings → Developer → Install Plugin from URL or ZIP.
-2. Start EmulationStation and a game. In **Stream Share Probe**, press **Check display layer**. Return to the game and verify the test layout appears, that the controller still operates the game, and that the `...` menu still opens. Stop the test.
-3. Press **Live game view**. Return to the game. Its *complete* image should appear in the left pane with no recursive copy of the test pane. The right pane stands in for a friend's video. Stop the test from Decky.
+1. Install the experimental `StreamShareProbe-0.0.3.zip` through Decky settings → Developer → Install Plugin from URL or ZIP.
+2. Start EmulationStation and a game. In **Stream Share Probe**, choose a layout and press **Check display layer**. Return to the game and verify the test layout appears, that the controller still operates the game, and that the `...` menu still opens. Stop the test.
+3. Press **Live game view**. Return to the game. Its *complete* image should appear in the local pane with no recursive copy of the test pane. The other pane stands in for a friend's video. Stop the test from Decky.
 
 If live capture fails, open the plugin again and read its log. It reports which Deck-user PipeWire socket it tried and whether that socket exists. The Deck must provide `gst-launch-1.0` with `pipewiresrc`; the probe reports a missing command rather than changing SteamOS. A test also stops when Decky unloads the plugin.
 The display test closes itself after 45 seconds; live capture closes after 90 seconds. You can also stop either test from Decky.

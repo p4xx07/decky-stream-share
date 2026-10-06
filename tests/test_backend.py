@@ -57,6 +57,26 @@ class BackendTest(unittest.TestCase):
             module.ensure_helper_executable(helper)
             self.assertTrue(os.access(helper, os.X_OK))
 
+    def test_invalid_layout_is_rejected(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as root:
+            decky = types.SimpleNamespace(DECKY_PLUGIN_RUNTIME_DIR=root, logger=logging.getLogger("probe-test"))
+            with patch.dict(sys.modules, {"decky": decky}):
+                spec = importlib.util.spec_from_file_location("stream_share_probe_layout", Path(__file__).parents[1] / "main.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+            async def check():
+                plugin = module.Plugin()
+                await plugin._main()
+                with self.assertRaisesRegex(ValueError, "Unknown split-view layout"):
+                    await plugin.set_layout("cropped")
+                self.assertEqual((await plugin.get_status())["layout"], "side")
+                self.assertEqual((await plugin.set_layout("stack"))["layout"], "stack")
+
+            asyncio.run(check())
+
 
 if __name__ == "__main__":
     unittest.main()

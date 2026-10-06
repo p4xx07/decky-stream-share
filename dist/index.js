@@ -85,6 +85,11 @@ function FaDesktop (props) {
 const getStatus = callable("get_status");
 const startProbe = callable("start_probe");
 const stopProbe = callable("stop_probe");
+const setProbeLayout = callable("set_layout");
+const layouts = ["side", "wide", "stack"];
+const layoutNames = {
+    side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
+};
 function Content() {
     const [status, setStatus] = SP_REACT.useState(null);
     const [busy, setBusy] = SP_REACT.useState(false);
@@ -131,7 +136,22 @@ function Content() {
             setBusy(false);
         }
     };
-    return SP_JSX.jsx(SP_JSX.Fragment, { children: SP_JSX.jsxs(DFL.PanelSection, { title: "Split-view feasibility test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "Start a game, then run Live game view. Your complete game should appear on the left; the right side is a test pattern. This does not connect to a friend yet." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Live game view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop test" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }) });
+    const changeLayout = async () => {
+        setBusy(true);
+        setError("");
+        try {
+            const current = status?.layout || "side";
+            const next = layouts[(layouts.indexOf(current) + 1) % layouts.length];
+            setStatus(await setProbeLayout(next));
+        }
+        catch (caught) {
+            setError(String(caught));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    return SP_JSX.jsx(SP_JSX.Fragment, { children: SP_JSX.jsxs(DFL.PanelSection, { title: "Split-view feasibility test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "Start a game, then run Live game view. Your complete game should fit in its pane; the other pane is a test pattern. This does not connect to a friend yet." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void changeLayout(), children: ["Layout: ", layoutNames[status?.layout || "side"], " (change)"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Live game view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop test" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }) });
 }
 var index = definePlugin(() => ({
     name: "Stream Share Probe",

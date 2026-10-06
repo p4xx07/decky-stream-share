@@ -121,20 +121,29 @@ void stop_capture(Capture &capture) {
     if (capture.fd >= 0) close(capture.fd);
 }
 
-void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern) {
+struct Rect {
+    int x;
+    int y;
+    int width;
+    int height;
+};
+
+void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern,
+            const Rect &game, const Rect &friend_view) {
     const int width = image->width;
     const int height = image->height;
-    const int left_width = width / 2;
-    const int fitted_height = std::min(height, left_width * kCaptureHeight / kCaptureWidth);
-    const int fitted_width = std::min(left_width, fitted_height * kCaptureWidth / kCaptureHeight);
-    const int left_x = (left_width - fitted_width) / 2;
-    const int top_y = (height - fitted_height) / 2;
+    const int fitted_width = std::min(game.width, game.height * kCaptureWidth / kCaptureHeight);
+    const int fitted_height = std::min(game.height, fitted_width * kCaptureHeight / kCaptureWidth);
+    const int fitted_x = game.x + (game.width - fitted_width) / 2;
+    const int fitted_y = game.y + (game.height - fitted_height) / 2;
 
     for (int y = 0; y < height; ++y) {
         auto *row = reinterpret_cast<uint32_t *>(image->data + y * image->bytes_per_line);
         for (int x = 0; x < width; ++x) {
-            if (x >= left_width) {
-                row[x] = ((x / 64 + y / 64) % 2) ? 0x00333d50 : 0x00262d3b;
+            if (x >= friend_view.x && x < friend_view.x + friend_view.width &&
+                y >= friend_view.y && y < friend_view.y + friend_view.height) {
+                row[x] = (((x - friend_view.x) / 64 + (y - friend_view.y) / 64) % 2)
+                             ? 0x00333d50 : 0x00262d3b;
             } else {
                 row[x] = 0x00121720;
             }
@@ -143,18 +152,18 @@ void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern
     if (frame.empty() && !pattern) return;
 
     for (int y = 0; y < fitted_height; ++y) {
-        auto *row = reinterpret_cast<uint32_t *>(image->data + (top_y + y) * image->bytes_per_line);
+        auto *row = reinterpret_cast<uint32_t *>(image->data + (fitted_y + y) * image->bytes_per_line);
         const int source_y = y * kCaptureHeight / fitted_height;
         for (int x = 0; x < fitted_width; ++x) {
             if (pattern) {
                 const int stripe = (x * 6 / fitted_width);
                 constexpr uint32_t colors[] = {0x00e53935, 0x00fdd835, 0x0043a047,
                                                 0x001e88e5, 0x008e24aa, 0x00f5f5f5};
-                row[left_x + x] = colors[stripe];
+                row[fitted_x + x] = colors[stripe];
             } else {
                 const int source_x = x * kCaptureWidth / fitted_width;
                 const auto *source = frame.data() + (source_y * kCaptureWidth + source_x) * 4;
-                row[left_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
+                row[fitted_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
                                   (uint32_t(source[2]) << 16);
             }
         }
@@ -163,12 +172,15 @@ void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 3 || std::strcmp(argv[1], "--mode") != 0) {
-        std::fprintf(stderr, "Usage: stream-share-probe --mode pattern|synthetic|live\n");
+    if (argc != 5 || std::strcmp(argv[1], "--mode") != 0 ||
+        std::strcmp(argv[3], "--layout") != 0) {
+        std::fprintf(stderr, "Usage: stream-share-probe --mode pattern|synthetic|live --layout side|wide|stack\n");
         return 2;
     }
     const std::string mode(argv[2]);
     if (mode != "pattern" && mode != "synthetic" && mode != "live") return 2;
+    const std::string layout(argv[4]);
+    if (layout != "side" && layout != "wide" && layout != "stack") return 2;
     // An orphaned full-screen layer would be difficult to dismiss in Gaming Mode.
     const pid_t parent = getppid();
     if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0 || getppid() != parent) return 8;
@@ -183,6 +195,21 @@ int main(int argc, char **argv) {
     const int screen = DefaultScreen(display);
     const int width = DisplayWidth(display, screen);
     const int height = DisplayHeight(display, screen);
+    if (width < 2 || height < 2) {
+        std::fprintf(stderr, "Display is too small for split view.\n");
+        XCloseDisplay(display);
+        return 4;
+    }
+    Rect game{};
+    Rect friend_view{};
+    if (layout == "stack") {
+        game = {0, 0, width, height / 2};
+        friend_view = {0, height / 2, width, height - height / 2};
+    } else {
+        const int game_width = layout == "wide" ? width * 2 / 3 : width / 2;
+        game = {0, 0, game_width, height};
+        friend_view = {game_width, 0, width - game_width, height};
+    }
     Visual *visual = DefaultVisual(display, screen);
     if (visual->red_mask != 0x00ff0000 || visual->green_mask != 0x0000ff00 ||
         visual->blue_mask != 0x000000ff) {
@@ -236,7 +263,8 @@ int main(int argc, char **argv) {
         XCloseDisplay(display);
         return 6;
     }
-    std::fprintf(stderr, "Display probe started: %s (%dx%d).\n", mode.c_str(), width, height);
+    std::fprintf(stderr, "Display probe started: %s, layout=%s (%dx%d).\n",
+                 mode.c_str(), layout.c_str(), width, height);
     std::fflush(stderr);
     int result = 0;
     const auto started = std::chrono::steady_clock::now();
@@ -251,15 +279,17 @@ int main(int argc, char **argv) {
             std::lock_guard<std::mutex> lock(capture.mutex);
             frame = capture.latest;
         }
-        render(image, frame, mode == "pattern");
+        render(image, frame, mode == "pattern", game, friend_view);
         XPutImage(display, window, gc, image, 0, 0, 0, 0, width, height);
         XSetForeground(display, gc, WhitePixel(display, screen));
         const char *friend_label = "FRIEND VIDEO GOES HERE";
         const char *local_label = mode == "pattern" ? "DISPLAY TEST" :
                                   (frame.empty() ? "WAITING FOR GAME CAPTURE" : "YOUR FULL GAME");
-        XDrawString(display, window, gc, width / 2 + 24, height / 2,
+        XDrawString(display, window, gc, friend_view.x + 24,
+                    friend_view.y + friend_view.height / 2,
                     friend_label, std::strlen(friend_label));
-        XDrawString(display, window, gc, 24, 28, local_label, std::strlen(local_label));
+        XDrawString(display, window, gc, game.x + 24, game.y + 28,
+                    local_label, std::strlen(local_label));
         XFlush(display);
         if (mode != "pattern" && capture.done) {
             std::fprintf(stderr, "Game capture stopped. Check GStreamer errors above.\n");

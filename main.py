@@ -47,6 +47,7 @@ class Plugin:
         self.process = None
         self.log_handle = None
         self.mode = ""
+        self.layout = "side"
 
     async def _unload(self):
         await self.stop_probe()
@@ -73,7 +74,7 @@ class Plugin:
             )
             self.log_handle.flush()
         self.process = subprocess.Popen(
-            [str(helper), "--mode", mode],
+            [str(helper), "--mode", mode, "--layout", self.layout],
             stdin=subprocess.DEVNULL,
             stdout=self.log_handle,
             stderr=subprocess.STDOUT,
@@ -81,6 +82,14 @@ class Plugin:
             start_new_session=True,
         )
         await asyncio.sleep(0.5)
+        return await self.get_status()
+
+    async def set_layout(self, layout: str):
+        if layout not in ("side", "wide", "stack"):
+            raise ValueError("Unknown split-view layout")
+        if self.process and self.process.poll() is None:
+            raise RuntimeError("Stop the display test before changing its layout")
+        self.layout = layout
         return await self.get_status()
 
     async def stop_probe(self):
@@ -102,7 +111,7 @@ class Plugin:
         running = self.process is not None and self.process.poll() is None
         exit_code = None if self.process is None else self.process.poll()
         if running:
-            message = f"{self.mode.title()} display test running. Return to the game to inspect it."
+            message = f"{self.mode.title()} display test running ({self.layout}). Return to the game to inspect it."
         elif exit_code is not None and exit_code != 0:
             message = f"Display test stopped with exit code {exit_code}. See details below."
         else:
@@ -111,4 +120,5 @@ class Plugin:
             log = self.log_path.read_text(encoding="utf-8", errors="replace")[-800:]
         except OSError:
             log = ""
-        return {"running": running, "mode": self.mode, "message": message, "log": log}
+        return {"running": running, "mode": self.mode, "layout": self.layout,
+                "message": message, "log": log}
