@@ -5,7 +5,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT = ROOT / "StreamShareProbe-0.0.1.zip"
+OUTPUT = ROOT / "StreamShareProbe-0.0.2.zip"
 FILES = ["plugin.json", "package.json", "main.py", "LICENSE", "README.md",
          "dist/index.js", "bin/stream-share-probe"]
 

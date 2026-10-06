@@ -29,8 +29,8 @@ jobs:
           docker build -f backend/Dockerfile -t stream-share-probe-build .
           docker run --rm -v "$PWD":/work -w /work stream-share-probe-build sh backend/build.sh
       - run: python3 package_plugin.py
-      - run: unzip -t StreamShareProbe-0.0.1.zip
+      - run: unzip -t StreamShareProbe-0.0.2.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StreamShareProbe-0.0.1
-          path: StreamShareProbe-0.0.1.zip
+          name: StreamShareProbe-0.0.2
+          path: StreamShareProbe-0.0.2.zip

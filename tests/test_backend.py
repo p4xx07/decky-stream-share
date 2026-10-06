@@ -16,11 +16,14 @@ class BackendTest(unittest.TestCase):
             spec = importlib.util.spec_from_file_location("stream_share_probe", Path(__file__).parents[1] / "main.py")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/tmp/_MEI123", "LD_LIBRARY_PATH_ORIG": "/usr/lib"}):
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/tmp/_MEI123", "LD_LIBRARY_PATH_ORIG": "/usr/lib", "XDG_RUNTIME_DIR": "/run/user/0", "PIPEWIRE_REMOTE": "wrong"}):
             env = module.external_program_env()
             self.assertEqual(env["LD_LIBRARY_PATH"], "/usr/lib")
             self.assertNotIn("LD_LIBRARY_PATH_ORIG", env)
             self.assertEqual(os.environ["LD_LIBRARY_PATH"], "/tmp/_MEI123")
+            self.assertEqual(env["XDG_RUNTIME_DIR"], f"/run/user/{os.getuid()}")
+            self.assertEqual(env["PIPEWIRE_RUNTIME_DIR"], f"/run/user/{os.getuid()}")
+            self.assertEqual(env["PIPEWIRE_REMOTE"], "pipewire-0")
 
     def test_probe_rejects_unknown_mode_without_starting_a_process(self):
         import asyncio

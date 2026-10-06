@@ -4,11 +4,11 @@ This is a **display feasibility test**, not the finished friend-streaming plugin
 
 ## Test on a Steam Deck
 
-1. Install the experimental `StreamShareProbe-0.0.1.zip` through Decky settings → Developer → Install Plugin from URL or ZIP.
+1. Install the experimental `StreamShareProbe-0.0.2.zip` through Decky settings → Developer → Install Plugin from URL or ZIP.
 2. Start EmulationStation and a game. In **Stream Share Probe**, press **Check display layer**. Return to the game and verify the test layout appears, that the controller still operates the game, and that the `...` menu still opens. Stop the test.
 3. Press **Live game view**. Return to the game. Its *complete* image should appear in the left pane with no recursive copy of the test pane. The right pane stands in for a friend's video. Stop the test from Decky.
 
-If live capture fails, open the plugin again and read its log. The Deck must provide `gst-launch-1.0` with `pipewiresrc`; the probe reports a missing command rather than changing SteamOS. A test also stops when Decky unloads the plugin.
+If live capture fails, open the plugin again and read its log. It reports which Deck-user PipeWire socket it tried and whether that socket exists. The Deck must provide `gst-launch-1.0` with `pipewiresrc`; the probe reports a missing command rather than changing SteamOS. A test also stops when Decky unloads the plugin.
 The display test closes itself after 45 seconds; live capture closes after 90 seconds. You can also stop either test from Decky.
 
 Please report whether the display appeared, whether all game edges remained visible, whether controls worked, the number of captured frames shown in the log, and your SteamOS/Decky versions. The test has to pass on actual Deck hardware before adding WebRTC, voice, room codes, or layout choices.

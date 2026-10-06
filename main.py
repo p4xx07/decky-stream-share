@@ -11,13 +11,18 @@ import decky
 
 
 def external_program_env() -> dict[str, str]:
-    """Avoid passing Decky's PyInstaller libraries to system programs."""
+    """Use the Deck user's PipeWire socket and system libraries."""
     env = os.environ.copy()
     original = env.pop("LD_LIBRARY_PATH_ORIG", None)
     if original:
         env["LD_LIBRARY_PATH"] = original
     else:
         env.pop("LD_LIBRARY_PATH", None)
+    env.pop("LD_PRELOAD", None)
+    runtime_dir = f"/run/user/{os.getuid()}"
+    env["XDG_RUNTIME_DIR"] = runtime_dir
+    env["PIPEWIRE_RUNTIME_DIR"] = runtime_dir
+    env["PIPEWIRE_REMOTE"] = "pipewire-0"
     env["DISPLAY"] = ":0"
     return env
 
@@ -59,12 +64,20 @@ class Plugin:
             self.log_handle.close()
         self.log_handle = self.log_path.open("w", encoding="utf-8")
         self.mode = mode
+        env = external_program_env()
+        if mode == "live":
+            socket = Path(env["PIPEWIRE_RUNTIME_DIR"]) / env["PIPEWIRE_REMOTE"]
+            self.log_handle.write(
+                f"PipeWire: uid={os.getuid()}, socket={socket}, "
+                f"socket_found={socket.is_socket()}\n"
+            )
+            self.log_handle.flush()
         self.process = subprocess.Popen(
             [str(helper), "--mode", mode],
             stdin=subprocess.DEVNULL,
             stdout=self.log_handle,
             stderr=subprocess.STDOUT,
-            env=external_program_env(),
+            env=env,
             start_new_session=True,
         )
         await asyncio.sleep(0.5)
