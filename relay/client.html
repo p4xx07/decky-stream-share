@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stream Share — Computer Client</title>
+  <style>
+    :root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #111827; color: #f9fafb; }
+    body { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    h1 { margin-bottom: 6px; }
+    p { color: #cbd5e1; line-height: 1.45; }
+    .controls, .videos { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+    button, input { font: inherit; border-radius: 8px; padding: 10px 12px; }
+    button { border: 0; background: #2563eb; color: white; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    button.secondary { background: #475569; }
+    input { border: 1px solid #64748b; background: #0f172a; color: white; text-transform: uppercase; }
+    .video { flex: 1 1 420px; min-width: 0; }
+    .video img, .video canvas { box-sizing: border-box; width: 100%; aspect-ratio: 8 / 5; object-fit: contain; border: 1px solid #475569; border-radius: 8px; background: #020617; }
+    .code { font: 700 1.3rem ui-monospace, monospace; letter-spacing: .1em; }
+    #status { min-height: 1.5em; }
+  </style>
+</head>
+<body>
+  <h1>Stream Share — Computer Client</h1>
+  <p>Use this computer as the second player. Create a room here and join its code on the Deck, or enter a code created on the Deck. The PC relay stays running in the background.</p>
+  <div class="controls">
+    <input id="codeInput" aria-label="Deck room code" placeholder="Deck room code" maxlength="10" autocomplete="off" spellcheck="false">
+    <button id="join">Join Deck room</button>
+    <button id="create" class="secondary">Create room here</button>
+    <button id="leave" class="secondary" disabled>Leave room</button>
+  </div>
+  <p>Room code: <span id="roomCode" class="code">—</span> · <span id="status" role="status">Disconnected</span></p>
+  <div class="controls">
+    <button id="pattern" disabled>Send test image</button>
+    <button id="screen" disabled>Share Mac screen</button>
+    <button id="stop" class="secondary" disabled>Stop sending</button>
+  </div>
+  <p>Start with the test image. For screen sharing, select your game window or another screen to avoid a mirror effect. This browser test handles video; microphone audio still needs two Decks.</p>
+  <div class="videos">
+    <section class="video"><h2>Deck game</h2><img id="deckVideo" alt="Waiting for Deck video"></section>
+    <section class="video"><h2>Sending to Deck</h2><canvas id="localVideo" width="640" height="400"></canvas></section>
+  </div>
+  <p id="counts">Frames: sent 0, received 0</p>
+  <script>
+    const $ = id => document.getElementById(id);
+    const canvas = $('localVideo');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const deckVideo = $('deckVideo');
+    let socket = null;
+    let peerConnected = false;
+    let mode = '';
+    let timer = null;
+    let mediaStream = null;
+    let screenVideo = null;
+    let encoding = false;
+    let imageUrl = null;
+    let sent = 0;
+    let received = 0;
+
+    function status(message) { $('status').textContent = message; }
+    function counts() { $('counts').textContent = `Frames: sent ${sent}, received ${received}`; }
+    function controls() {
+      const connected = socket && socket.readyState === WebSocket.OPEN;
+      $('join').disabled = !!connected;
+      $('create').disabled = !!connected;
+      $('leave').disabled = !connected;
+      $('pattern').disabled = !connected;
+      $('screen').disabled = !connected;
+      $('stop').disabled = !mode;
+    }
+    function stopSending() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      mode = '';
+      if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+      mediaStream = null;
+      if (screenVideo) screenVideo.srcObject = null;
+      screenVideo = null;
+      controls();
+    }
+    function leave() {
+      stopSending();
+      if (socket) socket.close();
+      socket = null;
+      peerConnected = false;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      imageUrl = null;
+      deckVideo.removeAttribute('src');
+      $('roomCode').textContent = '—';
+      status('Disconnected');
+      controls();
+    }
+    function connect(action) {
+      const code = $('codeInput').value.trim().toUpperCase();
+      if (action === 'join' && !/^[A-Z2-9]{10}$/.test(code)) {
+        status('Enter the 10-character code shown on the Deck.');
+        return;
+      }
+      leave();
+      const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
+      const ws = new WebSocket(url);
+      socket = ws;
+      ws.binaryType = 'arraybuffer';
+      status('Connecting…');
+      ws.onopen = () => { ws.send(JSON.stringify(action === 'join' ? { type: 'join', code } : { type: 'create' })); controls(); };
+      ws.onmessage = event => {
+        if (typeof event.data === 'string') {
+          let message;
+          try { message = JSON.parse(event.data); } catch { return; }
+          if (message.type === 'room') {
+            $('roomCode').textContent = message.code;
+            status(message.role === 'host' ? 'Waiting for Deck to join' : 'Joined Deck room');
+          } else if (message.type === 'peer_joined') {
+            peerConnected = true;
+            status('Deck connected');
+          } else if (message.type === 'peer_left') {
+            peerConnected = false;
+            status('Deck disconnected');
+          } else if (message.type === 'room_closed') {
+            status('Room closed');
+          } else if (message.type === 'error') {
+            status(`Relay error: ${message.message}`);
+          }
+          return;
+        }
+        const bytes = new Uint8Array(event.data);
+        if (bytes[0] !== 86) return;
+        if (imageUrl) URL.revokeObjectURL(imageUrl);
+        imageUrl = URL.createObjectURL(new Blob([bytes.subarray(1)], { type: 'image/jpeg' }));
+        deckVideo.src = imageUrl;
+        received++;
+        counts();
+      };
+      ws.onerror = () => status('Connection error; check that the relay is running.');
+      ws.onclose = () => { if (socket === ws) { socket = null; stopSending(); peerConnected = false; controls(); } };
+    }
+    function drawPattern() {
+      ctx.fillStyle = '#172554';
+      ctx.fillRect(0, 0, 640, 400);
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = `hsl(${i * 45}, 85%, 55%)`;
+        ctx.fillRect(i * 80, 0, 80, 270);
+      }
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 38px system-ui';
+      ctx.fillText('MAC TEST IMAGE', 38, 330);
+      ctx.font = '24px system-ui';
+      ctx.fillText(new Date().toLocaleTimeString(), 38, 370);
+    }
+    function drawScreen() {
+      if (!screenVideo || screenVideo.readyState < 2 || !screenVideo.videoWidth || !screenVideo.videoHeight) return false;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 640, 400);
+      const scale = Math.min(640 / screenVideo.videoWidth, 400 / screenVideo.videoHeight);
+      const width = Math.round(screenVideo.videoWidth * scale);
+      const height = Math.round(screenVideo.videoHeight * scale);
+      ctx.drawImage(screenVideo, (640 - width) / 2, (400 - height) / 2, width, height);
+      return true;
+    }
+    function tick() {
+      if (encoding || !peerConnected || !socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 512 * 1024) return;
+      if (mode === 'pattern') drawPattern();
+      else if (mode === 'screen' && !drawScreen()) return;
+      else if (!mode) return;
+      encoding = true;
+      canvas.toBlob(async blob => {
+        try {
+          if (blob && socket && socket.readyState === WebSocket.OPEN && peerConnected) {
+            const jpeg = new Uint8Array(await blob.arrayBuffer());
+            if (jpeg.length < 512 * 1024) {
+              const packet = new Uint8Array(jpeg.length + 1);
+              packet[0] = 86;
+              packet.set(jpeg, 1);
+              socket.send(packet);
+              sent++;
+              counts();
+            }
+          }
+        } finally { encoding = false; }
+      }, 'image/jpeg', 0.55);
+    }
+    function start(modeName) {
+      stopSending();
+      mode = modeName;
+      if (mode === 'pattern') drawPattern();
+      timer = setInterval(tick, 100);
+      controls();
+    }
+    $('join').onclick = () => connect('join');
+    $('create').onclick = () => connect('create');
+    $('leave').onclick = leave;
+    $('pattern').onclick = () => start('pattern');
+    $('screen').onclick = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        start('screen');
+        mediaStream = stream;
+        screenVideo = document.createElement('video');
+        screenVideo.srcObject = stream;
+        screenVideo.muted = true;
+        await screenVideo.play();
+        stream.getVideoTracks()[0].addEventListener('ended', stopSending, { once: true });
+      } catch (error) { status(`Screen sharing failed: ${error.message}`); stopSending(); }
+    };
+    $('stop').onclick = stopSending;
+    controls();
+  </script>
+</body>
+</html>

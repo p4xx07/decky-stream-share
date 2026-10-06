@@ -6,10 +6,12 @@ This alpha sends JPEG video (about 640×400, at most 10 fps) and Opus microphone
 
 ## Install and try
 
-1. On a Windows, macOS, or Linux PC, download and unzip `StreamShareRelay-0.1.0-alpha.1.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
-2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. Install `StreamShare-0.1.0-alpha.1.zip` using Decky settings → Developer → Install Plugin from URL or ZIP.
+1. On a Windows, macOS, or Linux PC, download and unzip `StreamShareRelay-0.1.0-alpha.2.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
+2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. Install `StreamShare-0.1.0-alpha.2.zip` using Decky settings → Developer → Install Plugin from URL or ZIP.
 3. Start a game on each Deck. In the plugin, enter the **same relay URL**. On one Deck choose **Create room** and tell your friend the displayed code. On the other choose **Join room** with that code.
 4. Choose a layout, press **Start split view** on both Decks, and return to the games. Enable microphone and friend audio separately if wanted. Use **Stop split view** and **Leave room** when finished.
+
+**One Deck test:** Open `http://127.0.0.1:57322/client` on the relay computer. Create a room on the Deck, enter its code in the browser page, and press **Join Deck room**. Press **Send test image** in the browser, then **Start split view** on the Deck. You should see the test image on the Deck and your Deck game in the browser. The browser page can also share the computer screen. The browser test handles video only; microphone audio still needs two Decks.
 
 Try **Check display layer** first if you have not yet tested the overlay. That test closes after 45 seconds. An unconnected live test closes after 90 seconds. A connected live session has a four-hour safety limit and also closes when the plugin unloads.
 

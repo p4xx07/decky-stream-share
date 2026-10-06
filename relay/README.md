@@ -16,7 +16,11 @@ python3 -m pip install -r requirements.txt
 python3 server.py
 ```
 
-The relay listens at `http://127.0.0.1:57322`. Keep that terminal running. For Decks on different home networks, install `cloudflared` on the PC and run this in a second terminal:
+The relay listens at `http://127.0.0.1:57322`. Keep that terminal running.
+
+**Test with one Deck and this computer:** open `http://127.0.0.1:57322/client` in a browser on the computer. Create a room on the Deck, enter its code on the browser page, press **Join Deck room**, then **Send test image**. Start split view on the Deck. The Deck's game appears in the browser and the test image appears on the Deck. **Share Mac screen** can send your computer screen instead. Browser microphone audio is not implemented yet.
+
+For Decks on different home networks, install `cloudflared` on the PC and run this in a second terminal:
 
 ```sh
 cloudflared tunnel --url http://localhost:57322

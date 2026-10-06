@@ -55,6 +55,14 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await guest.receive_json(timeout=1))["type"], "error")
         await guest.close()
 
+    async def test_computer_client_page_is_served(self):
+        async with self.session.get(f"http://127.0.0.1:{self.port}/client") as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("text/html", response.headers["Content-Type"])
+            page = await response.text()
+            self.assertIn("Join Deck room", page)
+            self.assertIn("Send test image", page)
+
     async def test_deck_client_pairs_and_receives_media(self):
         base = f"http://127.0.0.1:{self.port}"
         frames = asyncio.Queue()

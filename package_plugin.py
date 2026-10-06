@@ -5,13 +5,13 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.1.0-alpha.1"
+VERSION = "0.1.0-alpha.2"
 OUTPUT = ROOT / f"StreamShare-{VERSION}.zip"
 RELAY_OUTPUT = ROOT / f"StreamShareRelay-{VERSION}.zip"
 FILES = ["plugin.json", "package.json", "main.py", "LICENSE", "README.md",
          "relay/__init__.py", "relay/client.py", "relay/audio.py",
          "dist/index.js", "bin/stream-share-renderer"]
-RELAY_FILES = ["relay/server.py", "relay/requirements.txt", "relay/README.md"]
+RELAY_FILES = ["relay/server.py", "relay/client.html", "relay/requirements.txt", "relay/README.md"]
 
 
 if __name__ == "__main__":

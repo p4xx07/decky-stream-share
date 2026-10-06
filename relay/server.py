@@ -5,6 +5,7 @@ import asyncio
 import secrets
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
@@ -61,6 +62,12 @@ def create_app() -> web.Application:
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "rooms": len(rooms)})
+
+    async def browser_client(_request: web.Request) -> web.FileResponse:
+        return web.FileResponse(
+            Path(__file__).with_name("client.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def socket(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(max_msg_size=MAX_MEDIA_BYTES + 1, heartbeat=20)
@@ -143,6 +150,7 @@ def create_app() -> web.Application:
         return ws
 
     app.router.add_get("/health", health)
+    app.router.add_get("/client", browser_client)
     app.router.add_get("/ws", socket)
     return app
 
