@@ -1,0 +1,36 @@
+name: Verify probe
+
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: python3 -m unittest discover -s tests -v
+      - name: Test renderer in a virtual X display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev xvfb gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+          sh backend/build.sh
+          xvfb-run -a sh -c './bin/stream-share-probe --mode synthetic > /tmp/stream-share-probe.log 2>&1 & probe_pid=$!; sleep 4; kill "$probe_pid"; wait "$probe_pid"; grep -q "Captured" /tmp/stream-share-probe.log'
+      - name: Build SteamOS helper
+        run: |
+          docker build -f backend/Dockerfile -t stream-share-probe-build .
+          docker run --rm -v "$PWD":/work -w /work stream-share-probe-build sh backend/build.sh
+      - run: python3 package_plugin.py
+      - run: unzip -t StreamShareProbe-0.0.1.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StreamShareProbe-0.0.1
+          path: StreamShareProbe-0.0.1.zip

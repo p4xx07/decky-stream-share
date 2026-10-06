@@ -1,0 +1,10 @@
+{
+  "name": "Stream Share Probe",
+  "author": "p4xx07",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["streaming", "game capture", "experimental"],
+    "description": "Test a full-frame split view in Gaming Mode."
+  }
+}
