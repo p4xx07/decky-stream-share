@@ -145,15 +145,7 @@ void render(XImage *image, const std::vector<unsigned char> &frame,
 
     for (int y = 0; y < height; ++y) {
         auto *row = reinterpret_cast<uint32_t *>(image->data + y * image->bytes_per_line);
-        for (int x = 0; x < width; ++x) {
-            if (x >= friend_view.x && x < friend_view.x + friend_view.width &&
-                y >= friend_view.y && y < friend_view.y + friend_view.height) {
-                row[x] = (((x - friend_view.x) / 64 + (y - friend_view.y) / 64) % 2)
-                             ? 0x00333d50 : 0x00262d3b;
-            } else {
-                row[x] = 0x00121720;
-            }
-        }
+        std::fill_n(row, width, 0x00000000);
     }
     if (!frame.empty() || pattern) {
         for (int y = 0; y < fitted_height; ++y) {
@@ -325,15 +317,6 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "Displayed 10 local game frames.\n");
             std::fflush(stderr);
         }
-        XSetForeground(display, gc, WhitePixel(display, screen));
-        const char *friend_label = remote.empty() ? "FRIEND VIDEO GOES HERE" : "FRIEND GAME";
-        const char *local_label = mode == "pattern" ? "DISPLAY TEST" :
-                                  (frame.empty() ? "WAITING FOR GAME CAPTURE" : "YOUR FULL GAME");
-        XDrawString(display, window, gc, friend_view.x + 24,
-                    friend_view.y + friend_view.height / 2,
-                    friend_label, std::strlen(friend_label));
-        XDrawString(display, window, gc, game.x + 24, game.y + 28,
-                    local_label, std::strlen(local_label));
         XFlush(display);
         if (mode != "pattern" && capture.done) {
             std::fprintf(stderr, "Game capture stopped. Check GStreamer errors above.\n");

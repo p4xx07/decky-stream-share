@@ -44,6 +44,7 @@ function Content() {
   const [error, setError] = useState("");
   const [roomError, setRoomError] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [relayUrl, setRelayUrl] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const relayLoaded = useRef(false);
@@ -134,9 +135,10 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("live")}>Start split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !status?.running} onClick={() => void stop()}>Stop split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow>{status?.message || "Loading status..."}</PanelSectionRow>
-      {status?.capture_diagnostic && <PanelSectionRow>{status.capture_diagnostic}</PanelSectionRow>}
       {error && <PanelSectionRow><div>Error: {error}</div></PanelSectionRow>}
-      {status?.log && <PanelSectionRow><div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{status.log}</div></PanelSectionRow>}
+      <PanelSectionRow><ButtonItem layout="below" onClick={() => setShowLogs(!showLogs)}>{showLogs ? "Hide logs" : "Show logs"}</ButtonItem></PanelSectionRow>
+      {showLogs && status?.capture_diagnostic && <PanelSectionRow>{status.capture_diagnostic}</PanelSectionRow>}
+      {showLogs && status?.log && <PanelSectionRow><div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{status.log}</div></PanelSectionRow>}
     </PanelSection>
     <PanelSection title="PC relay">
       <PanelSectionRow><TextField label="PC relay URL" value={relayUrl} onChange={event => { relayLoaded.current = true; setRelayUrl(event.target.value); }} /></PanelSectionRow>
@@ -147,7 +149,7 @@ function Content() {
       {status?.room_code && <PanelSectionRow>Room code: {status.room_code}</PanelSectionRow>}
       <PanelSectionRow>{connecting ? "Connecting to PC relay…" : (status?.relay_message || "Not connected")}</PanelSectionRow>
       {roomError && <PanelSectionRow><div style={{ color: "#ffb4a9", overflowWrap: "anywhere" }}>Error: {roomError}</div></PanelSectionRow>}
-      {!!status?.room_connected && <PanelSectionRow>Video frames: sent {status.sent_frames}, received {status.received_frames}</PanelSectionRow>}
+      {showLogs && !!status?.room_connected && <PanelSectionRow>Video frames: sent {status.sent_frames}, received {status.received_frames}</PanelSectionRow>}
       {!!status?.room_connected && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void toggleAudio("microphone")}>Microphone: {status.microphone_enabled ? "On" : "Off"}</ButtonItem></PanelSectionRow>}
       {!!status?.room_connected && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void toggleAudio("speaker")}>Friend audio: {status.speaker_enabled ? "On" : "Off"}</ButtonItem></PanelSectionRow>}
     </PanelSection>

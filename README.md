@@ -8,7 +8,7 @@ This alpha sends JPEG video (about 640×400, at most 10 fps) and Opus microphone
 
 1. On a Windows, macOS, or Linux PC, download and unzip `pc-relay.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
 2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. In Decky settings → Developer → Install Plugin from URL, enter `http://<PC-LAN-IP>:57322/d.zip`. The same `decky.zip` is also on the [latest alpha release](https://github.com/p4xx07/decky-stream-share/releases).
-   Alpha 1 and alpha 2 could leave the room buttons gray. Alpha 3 could leave the local game pane blank. Install this alpha 4 build for both fixes.
+   Alpha 1 and alpha 2 could leave the room buttons gray. Alpha 3 could leave the local game pane blank. This alpha 5 build includes those fixes, a black background, and a Show logs button that is off by default.
 3. Start a game on each Deck. In the plugin, enter the **same relay URL**. On one Deck choose **Create room** and tell your friend the six-digit code. On the other choose **Join room** with that code.
 4. Choose a layout, press **Start split view** on both Decks, and return to the games. Enable microphone and friend audio separately if wanted. Use **Stop split view** and **Leave room** when finished.
 
@@ -18,7 +18,7 @@ Try **Check display layer** first if you have not yet tested the overlay. That t
 
 ## Important test status
 
-The display pattern, native JPEG bridge, relay pairing, and frontend build have off-device tests. The display pattern worked on one real Deck. An earlier live capture test failed to connect to PipeWire; the Deck user runtime environment was corrected in v0.0.2 but has **not yet been retested on Deck hardware**. This alpha cannot be claimed to work end to end until both Decks are tested. If live capture fails, copy the error shown in the plugin, including the `PipeWire:` line. If microphone fails, its GStreamer error is shown; voice is optional.
+One real Deck and a Mac have paired and exchanged live game and browser video. The local game pane still redraws a captured copy at 10 fps, so demanding games can feel delayed or choppy. Two-Deck use and voice remain untested. Use **Show logs** if capture or audio fails.
 
 The plugin does not install system packages or change SteamOS settings. Stop the split view from Decky if the display looks wrong. Media passes through your PC relay; a Cloudflare Quick Tunnel also routes it through Cloudflare. Use a trusted relay and share room codes privately.
 
@@ -37,4 +37,4 @@ docker run --rm -v "$PWD":/work -w /work stream-share-build sh backend/build.sh
 python3 package_plugin.py
 ```
 
-The renderer uses a [Gamescope external overlay](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp) and game capture. It scales both complete 16:10 source frames into their panes; the overlay does not take input focus. Actual Deck compatibility must be checked on hardware.
+The renderer uses a [Gamescope external overlay](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp) and game capture. It scales both complete 16:10 source frames into their panes; the overlay does not take input focus. A direct, low-latency local pane needs compositor control; see [the Gamescope prototype plan](docs/gamescope-direct-plan.md).

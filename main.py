@@ -258,7 +258,7 @@ class Plugin:
         if running:
             message = f"{self.mode.title()} split view running ({self.layout}). Return to the game."
         elif exit_code is not None and exit_code != 0:
-            message = f"Split view stopped with exit code {exit_code}. See details below."
+            message = f"Split view stopped with exit code {exit_code}. Open Show logs for details."
         else:
             message = "Split view stopped."
         try:
