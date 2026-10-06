@@ -1,29 +1,37 @@
-# Stream Share Probe
+# Stream Share for Decky (alpha)
 
-This is a **display feasibility test**, not the finished friend-streaming plugin. It has no networking or microphone yet. In Gaming Mode it tries to show your entire running game, scaled into a local pane beside a test pane. Equal side-by-side, larger-local, and top/bottom layouts keep the full game frame visible. It does not change SteamOS settings, install system packages, or request root access.
+Show your full game beside a friend's game in Steam Deck Gaming Mode. Choose equal side by side, larger local game, or top/bottom. Optional microphone and friend audio start **off**. Both Decks keep their own game and controls; this does not provide shared controls.
 
-## Test on a Steam Deck
+This alpha sends JPEG video (about 640×400, at most 10 fps) and Opus microphone audio through a small PC relay over WebSockets. It is **not WebRTC**. Latency and video quality depend on the connection. A PC must stay on while you play.
 
-1. Install the experimental `StreamShareProbe-0.0.3.zip` through Decky settings → Developer → Install Plugin from URL or ZIP.
-2. Start EmulationStation and a game. In **Stream Share Probe**, choose a layout and press **Check display layer**. Return to the game and verify the test layout appears, that the controller still operates the game, and that the `...` menu still opens. Stop the test.
-3. Press **Live game view**. Return to the game. Its *complete* image should appear in the local pane with no recursive copy of the test pane. The other pane stands in for a friend's video. Stop the test from Decky.
+## Install and try
 
-If live capture fails, open the plugin again and read its log. It reports which Deck-user PipeWire socket it tried and whether that socket exists. The Deck must provide `gst-launch-1.0` with `pipewiresrc`; the probe reports a missing command rather than changing SteamOS. A test also stops when Decky unloads the plugin.
-The display test closes itself after 45 seconds; live capture closes after 90 seconds. You can also stop either test from Decky.
+1. On a Windows, macOS, or Linux PC, download and unzip `StreamShareRelay-0.1.0-alpha.1.zip` from [Releases](https://github.com/p4xx07/decky-stream-share/releases). Follow its short README to start the relay.
+2. On **each Deck**, uninstall the old **Stream Share Probe** plugin if installed. Install `StreamShare-0.1.0-alpha.1.zip` using Decky settings → Developer → Install Plugin from URL or ZIP.
+3. Start a game on each Deck. In the plugin, enter the **same relay URL**. On one Deck choose **Create room** and tell your friend the displayed code. On the other choose **Join room** with that code.
+4. Choose a layout, press **Start split view** on both Decks, and return to the games. Enable microphone and friend audio separately if wanted. Use **Stop split view** and **Leave room** when finished.
 
-Please report whether the display appeared, whether all game edges remained visible, whether controls worked, the number of captured frames shown in the log, and your SteamOS/Decky versions. The test has to pass on actual Deck hardware before adding WebRTC, voice, room codes, or layout choices.
+Try **Check display layer** first if you have not yet tested the overlay. That test closes after 45 seconds. An unconnected live test closes after 90 seconds. A connected live session has a four-hour safety limit and also closes when the plugin unloads.
+
+## Important test status
+
+The display pattern, native JPEG bridge, relay pairing, and frontend build have off-device tests. The display pattern worked on one real Deck. An earlier live capture test failed to connect to PipeWire; the Deck user runtime environment was corrected in v0.0.2 but has **not yet been retested on Deck hardware**. This alpha cannot be claimed to work end to end until both Decks are tested. If live capture fails, copy the error shown in the plugin, including the `PipeWire:` line. If microphone fails, its GStreamer error is shown; voice is optional.
+
+The plugin does not install system packages or change SteamOS settings. Stop the split view from Decky if the display looks wrong. Media passes through your PC relay; a Cloudflare Quick Tunnel also routes it through Cloudflare. Use a trusted relay and share room codes privately.
 
 ## Build
 
-The frontend uses Node 22. The native helper is built against the SteamOS Holo image to avoid newer Linux C++ runtime requirements.
+Node 22, Python 3.12, and Docker are used for the release build. The native helper is compiled against a SteamOS Holo base image.
 
 ```sh
 npm ci
 npm run typecheck
 npm run build
-docker build -f backend/Dockerfile -t stream-share-probe-build .
-docker run --rm -v "$PWD":/work -w /work stream-share-probe-build sh backend/build.sh
+python3 -m pip install -r relay/requirements.txt
+python3 -m unittest discover -s tests -v
+docker build -f backend/Dockerfile -t stream-share-build .
+docker run --rm -v "$PWD":/work -w /work stream-share-build sh backend/build.sh
 python3 package_plugin.py
 ```
 
-The source for the helper is in `backend/probe.cpp`. Its only runtime system dependencies are X11/Xext and a GStreamer executable for live capture. The design uses [Gamescope's external overlay window](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp) and its [PipeWire game capture](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp); compatibility with a particular Deck still needs the test above.
+The renderer uses a [Gamescope external overlay](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp) and game capture. It scales both complete 16:10 source frames into their panes; the overlay does not take input focus. Actual Deck compatibility must be checked on hardware.

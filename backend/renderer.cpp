@@ -1,4 +1,5 @@
-// Temporary display experiment. It never changes Gamescope or Steam settings.
+// Stream Share overlay renderer. It never changes Gamescope or Steam settings.
+#include "media_bridge.h"
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -55,7 +56,7 @@ bool read_frame(int fd, std::vector<unsigned char> &frame) {
     return offset == frame.size();
 }
 
-bool start_capture(Capture &capture, bool synthetic) {
+bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
     int pipefd[2];
     if (pipe(pipefd) != 0) return false;
     capture.pid = fork();
@@ -86,9 +87,10 @@ bool start_capture(Capture &capture, bool synthetic) {
     }
     close(pipefd[1]);
     capture.fd = pipefd[0];
-    capture.reader = std::thread([&capture] {
+    capture.reader = std::thread([&capture, bridge] {
         std::vector<unsigned char> frame(kCaptureBytes);
         while (read_frame(capture.fd, frame)) {
+            if (bridge) bridge->submit(frame);
             {
                 std::lock_guard<std::mutex> lock(capture.mutex);
                 capture.latest.swap(frame);
@@ -128,7 +130,8 @@ struct Rect {
     int height;
 };
 
-void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern,
+void render(XImage *image, const std::vector<unsigned char> &frame,
+            const std::vector<unsigned char> &remote, bool pattern,
             const Rect &game, const Rect &friend_view) {
     const int width = image->width;
     const int height = image->height;
@@ -149,22 +152,40 @@ void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern
             }
         }
     }
-    if (frame.empty() && !pattern) return;
-
-    for (int y = 0; y < fitted_height; ++y) {
-        auto *row = reinterpret_cast<uint32_t *>(image->data + (fitted_y + y) * image->bytes_per_line);
-        const int source_y = y * kCaptureHeight / fitted_height;
-        for (int x = 0; x < fitted_width; ++x) {
-            if (pattern) {
-                const int stripe = (x * 6 / fitted_width);
-                constexpr uint32_t colors[] = {0x00e53935, 0x00fdd835, 0x0043a047,
-                                                0x001e88e5, 0x008e24aa, 0x00f5f5f5};
-                row[fitted_x + x] = colors[stripe];
-            } else {
-                const int source_x = x * kCaptureWidth / fitted_width;
-                const auto *source = frame.data() + (source_y * kCaptureWidth + source_x) * 4;
-                row[fitted_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
-                                  (uint32_t(source[2]) << 16);
+    if (!frame.empty() || pattern) {
+        for (int y = 0; y < fitted_height; ++y) {
+            auto *row = reinterpret_cast<uint32_t *>(image->data + (fitted_y + y) * image->bytes_per_line);
+            const int source_y = y * kCaptureHeight / fitted_height;
+            for (int x = 0; x < fitted_width; ++x) {
+                if (pattern) {
+                    const int stripe = (x * 6 / fitted_width);
+                    constexpr uint32_t colors[] = {0x00e53935, 0x00fdd835, 0x0043a047,
+                                                    0x001e88e5, 0x008e24aa, 0x00f5f5f5};
+                    row[fitted_x + x] = colors[stripe];
+                } else {
+                    const int source_x = x * kCaptureWidth / fitted_width;
+                    const auto *source = frame.data() + (source_y * kCaptureWidth + source_x) * 4;
+                    row[fitted_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
+                                      (uint32_t(source[2]) << 16);
+                }
+            }
+        }
+    }
+    if (!remote.empty()) {
+        const int friend_width = std::min(friend_view.width,
+                                          friend_view.height * kCaptureWidth / kCaptureHeight);
+        const int friend_height = std::min(friend_view.height,
+                                           friend_width * kCaptureHeight / kCaptureWidth);
+        const int friend_x = friend_view.x + (friend_view.width - friend_width) / 2;
+        const int friend_y = friend_view.y + (friend_view.height - friend_height) / 2;
+        for (int y = 0; y < friend_height; ++y) {
+            auto *row = reinterpret_cast<uint32_t *>(image->data + (friend_y + y) * image->bytes_per_line);
+            const int source_y = y * kCaptureHeight / friend_height;
+            for (int x = 0; x < friend_width; ++x) {
+                const int source_x = x * kCaptureWidth / friend_width;
+                const auto *source = remote.data() + (source_y * kCaptureWidth + source_x) * 4;
+                row[friend_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
+                                    (uint32_t(source[2]) << 16);
             }
         }
     }
@@ -172,20 +193,23 @@ void render(XImage *image, const std::vector<unsigned char> &frame, bool pattern
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 5 || std::strcmp(argv[1], "--mode") != 0 ||
-        std::strcmp(argv[3], "--layout") != 0) {
-        std::fprintf(stderr, "Usage: stream-share-probe --mode pattern|synthetic|live --layout side|wide|stack\n");
+    if ((argc != 5 && argc != 7) || std::strcmp(argv[1], "--mode") != 0 ||
+        std::strcmp(argv[3], "--layout") != 0 ||
+        (argc == 7 && std::strcmp(argv[5], "--ipc") != 0)) {
+        std::fprintf(stderr, "Usage: stream-share-renderer --mode pattern|synthetic|live --layout side|wide|stack [--ipc socket]\n");
         return 2;
     }
     const std::string mode(argv[2]);
     if (mode != "pattern" && mode != "synthetic" && mode != "live") return 2;
     const std::string layout(argv[4]);
     if (layout != "side" && layout != "wide" && layout != "stack") return 2;
+    const std::string ipc_path = argc == 7 ? argv[6] : "";
     // An orphaned full-screen layer would be difficult to dismiss in Gaming Mode.
     const pid_t parent = getppid();
     if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0 || getppid() != parent) return 8;
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
+    std::signal(SIGPIPE, SIG_IGN);
 
     Display *display = XOpenDisplay(nullptr);
     if (!display) {
@@ -213,7 +237,7 @@ int main(int argc, char **argv) {
     Visual *visual = DefaultVisual(display, screen);
     if (visual->red_mask != 0x00ff0000 || visual->green_mask != 0x0000ff00 ||
         visual->blue_mask != 0x000000ff) {
-        std::fprintf(stderr, "Unsupported X11 pixel format for this probe.\n");
+        std::fprintf(stderr, "Unsupported X11 pixel format for the split view.\n");
         XCloseDisplay(display);
         return 4;
     }
@@ -254,24 +278,35 @@ int main(int argc, char **argv) {
         return 5;
     }
     GC gc = XCreateGC(display, window, 0, nullptr);
+    MediaBridge bridge;
+    if (!ipc_path.empty() && !bridge.start(ipc_path)) {
+        XFreeGC(display, gc);
+        XDestroyImage(image);
+        XDestroyWindow(display, window);
+        XCloseDisplay(display);
+        return 9;
+    }
     Capture capture;
-    if (mode != "pattern" && !start_capture(capture, mode == "synthetic")) {
+    if (mode != "pattern" && !start_capture(capture, mode == "synthetic",
+                                              ipc_path.empty() ? nullptr : &bridge)) {
         std::fprintf(stderr, "Could not start capture process.\n");
+        bridge.stop();
         XFreeGC(display, gc);
         XDestroyImage(image);
         XDestroyWindow(display, window);
         XCloseDisplay(display);
         return 6;
     }
-    std::fprintf(stderr, "Display probe started: %s, layout=%s (%dx%d).\n",
+    std::fprintf(stderr, "Stream Share started: %s, layout=%s (%dx%d).\n",
                  mode.c_str(), layout.c_str(), width, height);
     std::fflush(stderr);
     int result = 0;
     const auto started = std::chrono::steady_clock::now();
-    const auto limit = mode == "pattern" ? std::chrono::seconds(45) : std::chrono::seconds(90);
+    const auto limit = mode == "pattern" ? std::chrono::seconds(45) :
+                       (ipc_path.empty() ? std::chrono::seconds(90) : std::chrono::hours(4));
     while (running) {
         if (std::chrono::steady_clock::now() - started >= limit) {
-            std::fprintf(stderr, "Display probe time limit reached; closing overlay.\n");
+            std::fprintf(stderr, "Split view time limit reached; closing overlay.\n");
             break;
         }
         std::vector<unsigned char> frame;
@@ -279,10 +314,11 @@ int main(int argc, char **argv) {
             std::lock_guard<std::mutex> lock(capture.mutex);
             frame = capture.latest;
         }
-        render(image, frame, mode == "pattern", game, friend_view);
+        const std::vector<unsigned char> remote = bridge.remote_frame();
+        render(image, frame, remote, mode == "pattern", game, friend_view);
         XPutImage(display, window, gc, image, 0, 0, 0, 0, width, height);
         XSetForeground(display, gc, WhitePixel(display, screen));
-        const char *friend_label = "FRIEND VIDEO GOES HERE";
+        const char *friend_label = remote.empty() ? "FRIEND VIDEO GOES HERE" : "FRIEND GAME";
         const char *local_label = mode == "pattern" ? "DISPLAY TEST" :
                                   (frame.empty() ? "WAITING FOR GAME CAPTURE" : "YOUR FULL GAME");
         XDrawString(display, window, gc, friend_view.x + 24,
@@ -299,6 +335,7 @@ int main(int argc, char **argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     stop_capture(capture);
+    bridge.stop();
     XFreeGC(display, gc);
     XDestroyImage(image);
     XDestroyWindow(display, window);

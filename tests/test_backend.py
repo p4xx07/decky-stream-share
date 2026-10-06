@@ -25,7 +25,7 @@ class BackendTest(unittest.TestCase):
             self.assertEqual(env["PIPEWIRE_RUNTIME_DIR"], f"/run/user/{os.getuid()}")
             self.assertEqual(env["PIPEWIRE_REMOTE"], "pipewire-0")
 
-    def test_probe_rejects_unknown_mode_without_starting_a_process(self):
+    def test_view_rejects_unknown_mode_without_starting_a_process(self):
         import asyncio
 
         with tempfile.TemporaryDirectory() as root:
@@ -38,8 +38,8 @@ class BackendTest(unittest.TestCase):
             async def check():
                 plugin = module.Plugin()
                 await plugin._main()
-                with self.assertRaisesRegex(ValueError, "Unknown probe mode"):
-                    await plugin.start_probe("anything")
+                with self.assertRaisesRegex(ValueError, "Unknown view mode"):
+                    await plugin.start_view("anything")
                 self.assertFalse((await plugin.get_status())["running"])
 
             asyncio.run(check())
