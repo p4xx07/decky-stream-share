@@ -29,7 +29,7 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
         room = await host.receive_json(timeout=1)
         self.assertEqual(room["role"], "host")
         self.assertEqual(len(room["code"]), 6)
-        self.assertRegex(room["code"], r"^[A-HJ-NP-Z2-9]{6}$")
+        self.assertRegex(room["code"], r"^[0-9]{6}$")
 
         guest = await self.connect()
         await guest.send_json({"type": "join", "code": room["code"]})
@@ -52,8 +52,19 @@ class RelayTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_wrong_code_is_rejected(self):
         guest = await self.connect()
-        await guest.send_json({"type": "join", "code": "INVALID123"})
+        await guest.send_json({"type": "join", "code": "999999"})
         self.assertEqual((await guest.receive_json(timeout=1))["type"], "error")
+        await guest.close()
+
+    async def test_failed_join_attempts_are_limited(self):
+        for _ in range(10):
+            guest = await self.connect()
+            await guest.send_json({"type": "join", "code": "999999"})
+            self.assertEqual((await guest.receive_json(timeout=1))["message"], "Room unavailable")
+            await guest.close()
+        guest = await self.connect()
+        await guest.send_json({"type": "join", "code": "999999"})
+        self.assertIn("Too many attempts", (await guest.receive_json(timeout=1))["message"])
         await guest.close()
 
     async def test_computer_client_page_is_served(self):

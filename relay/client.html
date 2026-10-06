@@ -93,8 +93,8 @@
     }
     function connect(action) {
       const code = $('codeInput').value.trim().toUpperCase();
-      if (action === 'join' && !/^[A-HJ-NP-Z2-9]{6}$/.test(code)) {
-        status('Enter the 6-character code shown on the Deck.');
+      if (action === 'join' && !/^\d{6}$/.test(code)) {
+        status('Enter the 6-digit code shown on the Deck.');
         return;
       }
       leave();

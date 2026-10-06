@@ -10,8 +10,10 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 
-ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+ALPHABET = "0123456789"
 ROOM_WAIT_SECONDS = 10 * 60
+JOIN_ATTEMPT_WINDOW_SECONDS = 60
+MAX_FAILED_JOINS_PER_WINDOW = 10
 MAX_MEDIA_BYTES = 512 * 1024
 ROOMS_KEY = web.AppKey("rooms", dict)
 
@@ -58,6 +60,7 @@ async def send_queued(peer: Peer) -> None:
 def create_app() -> web.Application:
     app = web.Application()
     rooms: dict[str, Room] = {}
+    failed_joins: dict[str, list[float]] = {}
     app[ROOMS_KEY] = rooms
 
     async def health(_request: web.Request) -> web.Response:
@@ -106,11 +109,21 @@ def create_app() -> web.Application:
                 peer.queue("json", {"type": "room", "code": code, "role": "host"})
             elif action == "join":
                 code = str(first.get("code", "")).strip().upper()
+                address = request.remote or "unknown"
+                now = time.monotonic()
+                attempts = [attempt for attempt in failed_joins.get(address, [])
+                            if now - attempt < JOIN_ATTEMPT_WINDOW_SECONDS]
+                if len(attempts) >= MAX_FAILED_JOINS_PER_WINDOW:
+                    await ws.send_json({"type": "error", "message": "Too many attempts. Try again in a minute"})
+                    return ws
                 room = rooms.get(code)
                 if (room is None or room.guest is not None or room.host.ws.closed
                         or time.monotonic() - room.created > ROOM_WAIT_SECONDS):
+                    attempts.append(now)
+                    failed_joins[address] = attempts
                     await ws.send_json({"type": "error", "message": "Room unavailable"})
                     return ws
+                failed_joins.pop(address, None)
                 peer = Peer(ws)
                 room.guest = peer
                 print(f"Peer joined from {request.remote}", flush=True)
