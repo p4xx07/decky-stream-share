@@ -24,7 +24,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxext-dev xvfb gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
           sh backend/build.sh
-          xvfb-run -a sh -c 'set -eu; for layout in side wide stack; do ./bin/stream-share-renderer --mode synthetic --layout "$layout" > "/tmp/stream-share-$layout.log" 2>&1 & renderer_pid=$!; sleep 3; kill "$renderer_pid"; wait "$renderer_pid"; grep -q "Captured" "/tmp/stream-share-$layout.log"; done'
+          xvfb-run -a sh -c 'set -eu; for layout in side wide stack; do ./bin/stream-share-renderer --mode synthetic --layout "$layout" > "/tmp/stream-share-$layout.log" 2>&1 & renderer_pid=$!; sleep 3; kill "$renderer_pid" 2>/dev/null || true; if ! wait "$renderer_pid"; then cat "/tmp/stream-share-$layout.log"; exit 1; fi; if ! grep -q "Captured" "/tmp/stream-share-$layout.log"; then cat "/tmp/stream-share-$layout.log"; exit 1; fi; done'
           xvfb-run -a python3 tests/media_bridge_smoke.py
           xvfb-run -a python3 -m tests.relay_native_smoke
           python3 -m tests.audio_bridge_smoke
