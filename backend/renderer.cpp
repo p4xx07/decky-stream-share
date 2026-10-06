@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,7 @@ struct Capture {
     std::atomic<bool> done{false};
     std::atomic<unsigned long> frames{0};
     std::mutex mutex;
+    std::condition_variable updated;
     std::vector<unsigned char> latest;
     std::thread reader;
 };
@@ -71,15 +73,16 @@ bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
         close(pipefd[1]);
         if (synthetic) {
             execlp("gst-launch-1.0", "gst-launch-1.0", "-q", "videotestsrc", "is-live=true",
-                   "!", "videoconvert", "!", "videoscale", "!", "videorate", "!",
-                   "video/x-raw,format=BGRx,width=640,height=400,framerate=15/1", "!",
+                   "!", "videoconvert", "!", "videoscale", "!", "videorate",
+                   "drop-only=true", "!",
+                   "video/x-raw,format=BGRx,width=640,height=400,framerate=30/1", "!",
                    "fdsink", "fd=1", "sync=false", static_cast<char *>(nullptr));
         } else {
             execlp("gst-launch-1.0", "gst-launch-1.0", "-q", "pipewiresrc",
                    "target-object=gamescope", "do-timestamp=true", "!", "queue",
                    "leaky=downstream", "max-size-buffers=1", "!", "videoconvert", "!",
-                   "videoscale", "!", "videorate", "!",
-                   "video/x-raw,format=BGRx,width=640,height=400,framerate=15/1", "!",
+                   "videoscale", "!", "videorate", "drop-only=true", "!",
+                   "video/x-raw,format=BGRx,width=640,height=400,framerate=30/1", "!",
                    "fdsink", "fd=1", "sync=false", static_cast<char *>(nullptr));
         }
         std::perror("Could not start gst-launch-1.0");
@@ -89,22 +92,30 @@ bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
     capture.fd = pipefd[0];
     capture.reader = std::thread([&capture, bridge] {
         std::vector<unsigned char> frame(kCaptureBytes);
+        auto next_share = std::chrono::steady_clock::now();
         while (read_frame(capture.fd, frame)) {
-            if (bridge) bridge->submit(frame);
+            const auto now = std::chrono::steady_clock::now();
+            if (bridge && now >= next_share) {
+                bridge->submit(frame);
+                next_share = now + std::chrono::milliseconds(100);
+            }
+            unsigned long count;
             {
                 std::lock_guard<std::mutex> lock(capture.mutex);
                 // Keep the read buffer allocated for the next full frame. Swapping
                 // leaves it empty, so the next read appears to succeed immediately
                 // and clears the local image before the display loop can use it.
                 capture.latest = frame;
+                count = ++capture.frames;
             }
-            unsigned long count = ++capture.frames;
+            capture.updated.notify_one();
             if (count == 1 || count % 75 == 0) {
                 std::fprintf(stderr, "Captured %lu frames\n", count);
                 std::fflush(stderr);
             }
         }
         capture.done = true;
+        capture.updated.notify_one();
     });
     return true;
 }
@@ -297,6 +308,8 @@ int main(int argc, char **argv) {
     std::fflush(stderr);
     int result = 0;
     unsigned long displayed_local_frames = 0;
+    unsigned long last_displayed_capture = 0;
+    std::vector<unsigned char> frame;
     const auto started = std::chrono::steady_clock::now();
     const auto limit = mode == "pattern" ? std::chrono::seconds(45) :
                        (ipc_path.empty() ? std::chrono::seconds(90) : std::chrono::hours(4));
@@ -305,10 +318,15 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "Split view time limit reached; closing overlay.\n");
             break;
         }
-        std::vector<unsigned char> frame;
         if (mode != "pattern") {
-            std::lock_guard<std::mutex> lock(capture.mutex);
-            frame = capture.latest;
+            std::unique_lock<std::mutex> lock(capture.mutex);
+            capture.updated.wait_for(lock, std::chrono::milliseconds(100), [&] {
+                return capture.frames != last_displayed_capture || capture.done || !running;
+            });
+            if (capture.frames != last_displayed_capture) {
+                frame = capture.latest;
+                last_displayed_capture = capture.frames;
+            }
         }
         const std::vector<unsigned char> remote = bridge.remote_frame();
         render(image, frame, remote, mode == "pattern", game, friend_view);
@@ -323,7 +341,7 @@ int main(int argc, char **argv) {
             result = 7;
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (mode == "pattern") std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     stop_capture(capture);
     bridge.stop();

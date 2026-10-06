@@ -1,6 +1,6 @@
 # Direct game pane prototype
 
-The current Decky overlay draws a captured copy of the local game. This adds capture, CPU copies, and a 10 fps redraw to the player's own view. Raising the capture rate would increase the work done while a demanding game is running.
+The current Decky overlay draws a captured copy of the local game. It now wakes when a captured frame arrives and can draw up to 30 fps, but capture and CPU copies still add work and delay while a demanding game is running.
 
 ## Proposed route
 
