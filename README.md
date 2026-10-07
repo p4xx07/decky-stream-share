@@ -1,13 +1,13 @@
-# Stream Share for Decky (alpha 7 candidate)
+# Stream Share for Decky (alpha 7 prerelease)
 
 Play your own EmuDeck GBA game on the left and see your friend's stream on the right, in Steam Deck Gaming Mode. Side, wide, stack, and full layouts are available from Decky. Microphone and friend audio are optional and start off. A PC or Mac runs the relay; the six-digit room code pairs two players.
 
 ## Install and play
 
-1. Start the PC relay from the matching `StreamShareRelay` ZIP using [its guide](relay/README.md).
-2. On each Deck, install `http://<PC-LAN-IP>:57322/d.zip` in Decky → Settings → Developer → Install Plugin from URL.
+1. Unzip `StreamShareRelay-0.1.0-alpha.7.zip` on a Windows, macOS, or Linux computer. Start it using [the relay guide](relay/README.md). Keep the terminal open.
+2. With the computer and Deck on the same Wi-Fi, install `http://<computer-IP>:57322/d.zip` on each Deck in Decky → Settings → Developer → Install Plugin from URL.
 3. In Stream Share, press **Set up GBA sharing** once. Restart ES-DE completely. Launch Pokémon Emerald using **mGBA** (RetroArch), then confirm **GBA game detected** in Decky.
-4. Enter the relay URL on both Decks. Create a room on one and join its six-digit code on the other. Select a layout and press **Start GBA split view**.
+4. Set **PC relay URL** to `http://<computer-IP>:57322` on both Decks. Create a room on one and join its six-digit code on the other. Select a layout and press **Start GBA split view**.
 
 For a one-Deck test, open `http://127.0.0.1:57322/client` on the relay computer, join the Deck's room, and send a test image. The browser client can receive Deck video and send its screen. Browser microphone audio is not implemented.
 
@@ -15,7 +15,7 @@ For a one-Deck test, open `http://127.0.0.1:57322/client` on the relay computer,
 
 ## Test status
 
-The previous alpha paired one Deck and a Mac. The direct GBA path in this candidate has passed automated tests and a SteamOS-targeted build, but **has not yet been verified on a Steam Deck**. Gamescope overlay blending, live RetroArch layout, two-Deck audio, and cross-network latency require real-device tests before a release claim.
+The previous alpha paired one Deck and a Mac. The direct GBA path in this prerelease has passed automated tests and a SteamOS-targeted build, but **has not yet been verified on a Steam Deck**. Gamescope overlay blending, live RetroArch layout, two-Deck audio, and cross-network latency still require real-device tests.
 
 Video currently uses JPEG over WebSockets at up to 10 fps; it is not WebRTC. The local game is rendered directly by RetroArch in the new GBA path, while the friend's stream may still be choppy. The legacy captured view for other games remains available under **Show logs**.
 
