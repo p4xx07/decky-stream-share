@@ -5,13 +5,13 @@ import { FaDesktop } from "react-icons/fa";
 
 type Layout = "side" | "wide" | "stack" | "full";
 type StreamStatus = {
-  running: boolean; mode: string; layout: Layout; message: string; log: string;
+  running: boolean; mode: string; layout: Layout; message: string; log: string; backend_version?: string;
   capture_diagnostic: string;
   relay_url: string; room_connected: boolean; room_code: string;
   peer_connected: boolean; relay_message: string;
   sent_frames: number; received_frames: number;
   microphone_enabled: boolean; speaker_enabled: boolean;
-  gba_prepared: boolean; gba_running: boolean; setup_message: string;
+  gba_prepared: boolean; gba_running: boolean; setup_message: string; gba_diagnostic?: string;
 };
 const getStatus = callable<[], StreamStatus>("get_status");
 const startView = callable<[mode: string], StreamStatus>("start_view");
@@ -28,6 +28,7 @@ const layouts: Layout[] = ["side", "wide", "stack", "full"];
 const layoutNames: Record<Layout, string> = {
   side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom", full: "Full local game",
 };
+const FRONTEND_BUILD = "0.1.0-alpha.8";
 
 async function within<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
   let timer: number | undefined;
@@ -46,6 +47,8 @@ function Content() {
   const [status, setStatus] = useState<StreamStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [lastAction, setLastAction] = useState("None yet");
   const [roomError, setRoomError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -60,14 +63,15 @@ function Content() {
       if (refreshing) return;
       refreshing = true;
       try {
-        const next = await within(getStatus(), 6000, "Decky backend did not respond. Reinstall the latest Stream Share ZIP and reopen Decky.");
+        const next = await within(getStatus(), 6000, "Stream Share backend did not answer. Reload it in Decky Settings → Plugins → Stream Share → ⋯.");
         if (active) {
           setStatus(next);
+          setStatusError("");
           if (next.room_connected) setRoomError("");
           if (!relayLoaded.current) { setRelayUrl(next.relay_url); relayLoaded.current = true; }
         }
       } catch (caught) {
-        if (active) setRoomError(errorMessage(caught));
+        if (active) setStatusError(`Status check: ${errorMessage(caught)}`);
       } finally { refreshing = false; }
     };
     void refresh();
@@ -102,10 +106,20 @@ function Content() {
   };
 
   const setupGba = async (action: "prepare" | "disable" | "restore") => {
+    const name = action === "prepare" ? "GBA setup" : action === "disable" ? "Disable GBA sharing" : "Restore ES-DE settings";
     setBusy(true);
     setError("");
-    try { setStatus(await (action === "prepare" ? prepareGba() : action === "disable" ? disableGba() : restoreGba())); }
-    catch (caught) { setError(errorMessage(caught)); }
+    setLastAction(`${name}: running`);
+    try {
+      const request = action === "prepare" ? prepareGba() : action === "disable" ? disableGba() : restoreGba();
+      setStatus(await within(request, 12000, `${name} did not answer within 12 seconds. Check backend status above.`));
+      setStatusError("");
+      setLastAction(`${name}: completed`);
+    } catch (caught) {
+      const detail = `${name}: ${errorMessage(caught)}`;
+      setError(detail);
+      setLastAction(detail);
+    }
     finally { setBusy(false); }
   };
 
@@ -115,7 +129,7 @@ function Content() {
     setRoomError("");
     try {
       setStatus(await within(startRoom(relayUrl, code), 15000,
-        "Decky backend did not answer within 15 seconds. Reinstall the latest Stream Share ZIP and reopen Decky."));
+        "Room connection did not answer within 15 seconds. Check backend status above."));
     } catch (caught) { setRoomError(errorMessage(caught)); }
     finally { setConnecting(false); setBusy(false); }
   };
@@ -142,7 +156,7 @@ function Content() {
   return <>
     <PanelSection title="Stream Share">
       <PanelSectionRow>For EmuDeck GBA: set up once, restart ES-DE, then launch the game. Connect to a room and start the view.</PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void setupGba("prepare")}>{status?.gba_prepared ? "Refresh GBA setup" : "Set up GBA sharing"}</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running || !!statusError} onClick={() => void setupGba("prepare")}>{status?.gba_prepared ? "Refresh GBA setup" : "Set up GBA sharing"}</ButtonItem></PanelSectionRow>
       <PanelSectionRow>{status?.gba_running ? "Stream Share GBA game detected" : status?.gba_prepared ? "Ready for GBA launch in ES-DE" : "GBA sharing not set up"}</PanelSectionRow>
       {status?.setup_message && <PanelSectionRow>{status.setup_message}</PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || (!!status?.running && status?.mode !== "direct")} onClick={() => void changeLayout()}>Layout: {layoutNames[status?.layout || "side"]} (change)</ButtonItem></PanelSectionRow>
@@ -150,8 +164,13 @@ function Content() {
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running || !status?.gba_running} onClick={() => void run("direct")}>Start GBA split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !status?.running} onClick={() => void stop()}>Stop split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow>{status?.message || "Loading status..."}</PanelSectionRow>
+      {statusError && <PanelSectionRow><div style={{ color: "#ffb4a9", overflowWrap: "anywhere" }}>{statusError}</div></PanelSectionRow>}
       {error && <PanelSectionRow><div>Error: {error}</div></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setShowLogs(!showLogs)}>{showLogs ? "Hide logs" : "Show logs"}</ButtonItem></PanelSectionRow>
+      {showLogs && <PanelSectionRow>UI {FRONTEND_BUILD}; backend {statusError ? "no response" : status?.backend_version || "unknown"}</PanelSectionRow>}
+      {showLogs && <PanelSectionRow>Last action: {lastAction}</PanelSectionRow>}
+      {showLogs && <PanelSectionRow>Backend status: {statusError || "connected"}</PanelSectionRow>}
+      {showLogs && status?.gba_diagnostic && <PanelSectionRow><div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{status.gba_diagnostic}</div></PanelSectionRow>}
       {showLogs && <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("live")}>Legacy captured view (other games)</ButtonItem></PanelSectionRow>}
       {showLogs && status?.gba_prepared && <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void setupGba("disable")}>Disable GBA sharing for next launch</ButtonItem></PanelSectionRow>}
       {showLogs && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void setupGba("restore")}>Restore ES-DE GBA settings</ButtonItem></PanelSectionRow>}

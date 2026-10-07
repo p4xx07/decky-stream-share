@@ -41,13 +41,13 @@ jobs:
           docker build -f backend/Dockerfile.retroarch-test -t stream-share-retroarch-test .
           docker run --rm -v "$PWD":/work -w /work stream-share-retroarch-test sh tests/run_retroarch_runtime_smoke.sh
       - run: python3 package_plugin.py
-      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.7.zip
-      - run: python3 tests/relay_package_smoke.py StreamShareRelay-0.1.0-alpha.7.zip StreamShare-0.1.0-alpha.7.zip
-      - run: unzip -t StreamShare-0.1.0-alpha.7.zip
-      - run: unzip -t StreamShareRelay-0.1.0-alpha.7.zip
+      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.8.zip
+      - run: python3 tests/relay_package_smoke.py StreamShareRelay-0.1.0-alpha.8.zip StreamShare-0.1.0-alpha.8.zip
+      - run: unzip -t StreamShare-0.1.0-alpha.8.zip
+      - run: unzip -t StreamShareRelay-0.1.0-alpha.8.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StreamShare-0.1.0-alpha.7
+          name: StreamShare-0.1.0-alpha.8
           path: |
-            StreamShare-0.1.0-alpha.7.zip
-            StreamShareRelay-0.1.0-alpha.7.zip
+            StreamShare-0.1.0-alpha.8.zip
+            StreamShareRelay-0.1.0-alpha.8.zip

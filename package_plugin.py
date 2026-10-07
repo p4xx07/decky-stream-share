@@ -5,7 +5,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "0.1.0-alpha.7"
+VERSION = "0.1.0-alpha.8"
 OUTPUT = ROOT / f"StreamShare-{VERSION}.zip"
 RELAY_OUTPUT = ROOT / f"StreamShareRelay-{VERSION}.zip"
 FILES = ["plugin.json", "package.json", "main.py", "LICENSE", "README.md",

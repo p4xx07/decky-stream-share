@@ -5,12 +5,18 @@ import os
 import shutil
 import stat
 import subprocess
+import traceback
 from pathlib import Path
 
 import decky
 from relay.audio import AudioBridge
 from relay.client import RelayConnection
-from retroarch import setup as gba_setup
+
+
+def load_gba_setup():
+    """Keep an optional GBA integration failure from taking down the whole backend."""
+    from retroarch import setup
+    return setup
 
 
 def external_program_env() -> dict[str, str]:
@@ -68,6 +74,9 @@ class Plugin:
         self.sent_frames = 0
         self.received_frames = 0
         self.capture_diagnostic = ""
+        self.gba_status_error = ""
+        self.gba_diagnostic = ""
+        decky.logger.info("Stream Share backend ready (%s)", os.environ.get("DECKY_PLUGIN_VERSION", "unknown version"))
 
     async def _unload(self):
         await self.stop_room()
@@ -195,6 +204,7 @@ class Plugin:
             self.log_handle.write(self.capture_diagnostic + "\n")
             self.log_handle.flush()
         args = [str(helper), "--mode", mode, "--layout", self.layout]
+        gba_setup = None
         try:
             if mode in ("live", "direct") and self.connection and not self.connection.closed:
                 self.media_socket_path.unlink(missing_ok=True)
@@ -204,6 +214,7 @@ class Plugin:
                 self.media_socket_path.chmod(0o600)
                 args += ["--ipc", str(self.media_socket_path)]
             if mode == "direct":
+                gba_setup = load_gba_setup()
                 await asyncio.to_thread(gba_setup.set_layout, self.layout)
             self.process = subprocess.Popen(
                 args,
@@ -219,7 +230,7 @@ class Plugin:
                 await self.media_server.wait_closed()
                 self.media_server = None
             self.media_socket_path.unlink(missing_ok=True)
-            if mode == "direct" and gba_setup.active():
+            if gba_setup is not None and gba_setup.active():
                 try:
                     await asyncio.to_thread(gba_setup.set_layout, "full")
                 except RuntimeError:
@@ -229,7 +240,7 @@ class Plugin:
             self.log_handle = None
             raise
         await asyncio.sleep(0.5)
-        if mode == "direct" and self.process.poll() is not None and gba_setup.active():
+        if gba_setup is not None and self.process.poll() is not None and gba_setup.active():
             try:
                 await asyncio.to_thread(gba_setup.set_layout, "full")
             except RuntimeError:
@@ -249,18 +260,29 @@ class Plugin:
         return await self.get_status()
 
     async def prepare_gba(self):
-        message = await asyncio.to_thread(gba_setup.install)
+        decky.logger.info("GBA setup started")
+        try:
+            gba_setup = load_gba_setup()
+            message = await asyncio.to_thread(gba_setup.install)
+        except Exception:
+            self.gba_diagnostic = traceback.format_exc()[-1600:]
+            decky.logger.exception("GBA setup failed")
+            raise
+        self.gba_diagnostic = ""
+        decky.logger.info("GBA setup completed")
         status = await self.get_status()
         status["setup_message"] = message
         return status
 
     async def disable_gba(self):
+        gba_setup = load_gba_setup()
         message = await asyncio.to_thread(gba_setup.disarm)
         status = await self.get_status()
         status["setup_message"] = message
         return status
 
     async def restore_gba(self):
+        gba_setup = load_gba_setup()
         if self.process and self.process.poll() is None:
             await self.stop_view()
         message = await asyncio.to_thread(gba_setup.restore_esde)
@@ -280,10 +302,12 @@ class Plugin:
                 await asyncio.to_thread(self.process.wait)
         self.process = None
         self.mode = ""
-        if was_direct and gba_setup.active():
+        if was_direct:
             try:
-                await asyncio.to_thread(gba_setup.set_layout, "full")
-            except RuntimeError as exc:
+                gba_setup = load_gba_setup()
+                if gba_setup.active():
+                    await asyncio.to_thread(gba_setup.set_layout, "full")
+            except Exception as exc:
                 restore_error = str(exc)
         if self.media_writer:
             self.media_writer.close()
@@ -316,7 +340,22 @@ class Plugin:
         except OSError:
             log = ""
         connection = self.connection
+        try:
+            gba_setup = load_gba_setup()
+            gba_prepared = (gba_setup.DATA / "armed").exists()
+            gba_running = gba_setup.active()
+            gba_message = ""
+            self.gba_status_error = ""
+        except Exception as exc:
+            gba_prepared = False
+            gba_running = False
+            gba_message = f"GBA integration unavailable: {type(exc).__name__}: {exc}"
+            if gba_message != self.gba_status_error:
+                self.gba_diagnostic = traceback.format_exc()[-1600:]
+                decky.logger.exception("GBA status check failed")
+                self.gba_status_error = gba_message
         return {"running": running, "mode": self.mode, "layout": self.layout,
+                "backend_version": os.environ.get("DECKY_PLUGIN_VERSION", "unknown"),
                 "message": message, "log": log,
                 "capture_diagnostic": self.capture_diagnostic,
                 "relay_url": self.relay_url,
@@ -327,6 +366,7 @@ class Plugin:
                 "sent_frames": self.sent_frames, "received_frames": self.received_frames,
                 "microphone_enabled": bool(self.audio and self.audio.microphone_enabled),
                 "speaker_enabled": bool(self.audio and self.audio.speaker_enabled),
-                "gba_prepared": (gba_setup.DATA / "armed").exists(),
-                "gba_running": gba_setup.active(),
-                "setup_message": ""}
+                "gba_prepared": gba_prepared,
+                "gba_running": gba_running,
+                "setup_message": gba_message,
+                "gba_diagnostic": self.gba_diagnostic}

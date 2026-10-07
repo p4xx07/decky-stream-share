@@ -95,8 +95,8 @@ class BackendTest(unittest.TestCase):
                 await plugin._main()
                 with patch.object(module, "ensure_helper_executable"), \
                      patch.object(module.shutil, "which", return_value="/usr/bin/gst-launch-1.0"), \
-                     patch.object(module.gba_setup, "set_layout") as set_layout, \
-                     patch.object(module.gba_setup, "active", return_value=True), \
+                     patch.object(module.load_gba_setup(), "set_layout") as set_layout, \
+                     patch.object(module.load_gba_setup(), "active", return_value=True), \
                      patch.object(module.subprocess, "Popen", side_effect=OSError("renderer failed")):
                     with self.assertRaisesRegex(OSError, "renderer failed"):
                         await plugin.start_view("direct")
@@ -104,6 +104,33 @@ class BackendTest(unittest.TestCase):
                                      ["side", "full"])
                     self.assertEqual(plugin.mode, "")
                     self.assertIsNone(plugin.log_handle)
+
+            asyncio.run(check())
+
+    def test_missing_gba_integration_does_not_stop_status(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as root:
+            decky = types.SimpleNamespace(DECKY_PLUGIN_RUNTIME_DIR=root,
+                                          logger=logging.getLogger("stream-share-status"))
+            with patch.dict(sys.modules, {"decky": decky}):
+                spec = importlib.util.spec_from_file_location(
+                    "stream_share_optional_gba", Path(__file__).parents[1] / "main.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+            async def check():
+                plugin = module.Plugin()
+                await plugin._main()
+                with patch.object(module, "load_gba_setup", side_effect=ImportError("missing RetroArch support")), \
+                     patch.object(decky.logger, "exception"):
+                    status = await plugin.get_status()
+                    self.assertFalse(status["gba_prepared"])
+                    self.assertIn("missing RetroArch support", status["setup_message"])
+                    self.assertIn("ImportError", status["gba_diagnostic"])
+                    with self.assertRaisesRegex(ImportError, "missing RetroArch support"):
+                        await plugin.prepare_gba()
+                    self.assertIn("ImportError", plugin.gba_diagnostic)
 
             asyncio.run(check())
 
