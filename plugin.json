@@ -1,10 +1,10 @@
 {
-  "name": "Stream Share Probe",
+  "name": "Stream Share",
   "author": "p4xx07",
   "flags": [],
   "api_version": 1,
   "publish": {
     "tags": ["streaming", "game capture", "experimental"],
-    "description": "Test a full-frame split view in Gaming Mode."
+    "description": "Experimental two-Deck split view with a PC relay and optional voice."
   }
 }

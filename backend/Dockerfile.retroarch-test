@@ -1,0 +1,3 @@
+FROM stream-share-build
+RUN pacman --disable-download-timeout --noconfirm -S xorg-server-xvfb retroarch vulkan-swrast libretro-mgba
+WORKDIR /work

@@ -1,4 +1,4 @@
-const manifest = {"name":"Stream Share Probe"};
+const manifest = {"name":"Stream Share"};
 const API_VERSION = 2;
 const internalAPIConnection = window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit;
 if (!internalAPIConnection) {
@@ -83,28 +83,75 @@ function FaDesktop (props) {
 }
 
 const getStatus = callable("get_status");
-const startProbe = callable("start_probe");
-const stopProbe = callable("stop_probe");
-const setProbeLayout = callable("set_layout");
-const layouts = ["side", "wide", "stack"];
+const startView = callable("start_view");
+const stopView = callable("stop_view");
+const setViewLayout = callable("set_layout");
+const startRoom = callable("start_room");
+const stopRoom = callable("stop_room");
+const setMicrophone = callable("set_microphone");
+const setSpeaker = callable("set_speaker");
+const prepareGba = callable("prepare_gba");
+const disableGba = callable("disable_gba");
+const restoreGba = callable("restore_gba");
+const layouts = ["side", "wide", "stack", "full"];
 const layoutNames = {
-    side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
+    side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom", full: "Full local game",
 };
+const FRONTEND_BUILD = "0.1.0-alpha.8";
+async function within(promise, milliseconds, message) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    }
+    finally {
+        if (timer !== undefined)
+            window.clearTimeout(timer);
+    }
+}
+function errorMessage(caught) {
+    return caught instanceof Error ? caught.message : String(caught);
+}
 function Content() {
     const [status, setStatus] = SP_REACT.useState(null);
     const [busy, setBusy] = SP_REACT.useState(false);
     const [error, setError] = SP_REACT.useState("");
+    const [statusError, setStatusError] = SP_REACT.useState("");
+    const [lastAction, setLastAction] = SP_REACT.useState("None yet");
+    const [roomError, setRoomError] = SP_REACT.useState("");
+    const [connecting, setConnecting] = SP_REACT.useState(false);
+    const [showLogs, setShowLogs] = SP_REACT.useState(false);
+    const [relayUrl, setRelayUrl] = SP_REACT.useState("");
+    const [joinCode, setJoinCode] = SP_REACT.useState("");
+    const relayLoaded = SP_REACT.useRef(false);
     SP_REACT.useEffect(() => {
         let active = true;
+        let refreshing = false;
         const refresh = async () => {
+            if (refreshing)
+                return;
+            refreshing = true;
             try {
-                const next = await getStatus();
-                if (active)
+                const next = await within(getStatus(), 6000, "Stream Share backend did not answer. Reload it in Decky Settings → Plugins → Stream Share → ⋯.");
+                if (active) {
                     setStatus(next);
+                    setStatusError("");
+                    if (next.room_connected)
+                        setRoomError("");
+                    if (!relayLoaded.current) {
+                        setRelayUrl(next.relay_url);
+                        relayLoaded.current = true;
+                    }
+                }
             }
             catch (caught) {
                 if (active)
-                    setError(String(caught));
+                    setStatusError(`Status check: ${errorMessage(caught)}`);
+            }
+            finally {
+                refreshing = false;
             }
         };
         void refresh();
@@ -115,7 +162,7 @@ function Content() {
         setBusy(true);
         setError("");
         try {
-            setStatus(await startProbe(mode));
+            setStatus(await startView(mode));
         }
         catch (caught) {
             setError(String(caught));
@@ -127,7 +174,7 @@ function Content() {
     const stop = async () => {
         setBusy(true);
         try {
-            setStatus(await stopProbe());
+            setStatus(await stopView());
         }
         catch (caught) {
             setError(String(caught));
@@ -142,7 +189,7 @@ function Content() {
         try {
             const current = status?.layout || "side";
             const next = layouts[(layouts.indexOf(current) + 1) % layouts.length];
-            setStatus(await setProbeLayout(next));
+            setStatus(await setViewLayout(next));
         }
         catch (caught) {
             setError(String(caught));
@@ -151,11 +198,74 @@ function Content() {
             setBusy(false);
         }
     };
-    return SP_JSX.jsx(SP_JSX.Fragment, { children: SP_JSX.jsxs(DFL.PanelSection, { title: "Split-view feasibility test", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "Start a game, then run Live game view. Your complete game should fit in its pane; the other pane is a test pattern. This does not connect to a friend yet." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void changeLayout(), children: ["Layout: ", layoutNames[status?.layout || "side"], " (change)"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Live game view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop test" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }) });
+    const setupGba = async (action) => {
+        const name = action === "prepare" ? "GBA setup" : action === "disable" ? "Disable GBA sharing" : "Restore ES-DE settings";
+        setBusy(true);
+        setError("");
+        setLastAction(`${name}: running`);
+        try {
+            const request = action === "prepare" ? prepareGba() : action === "disable" ? disableGba() : restoreGba();
+            setStatus(await within(request, 12000, `${name} did not answer within 12 seconds. Check backend status above.`));
+            setStatusError("");
+            setLastAction(`${name}: completed`);
+        }
+        catch (caught) {
+            const detail = `${name}: ${errorMessage(caught)}`;
+            setError(detail);
+            setLastAction(detail);
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const connectRoom = async (code) => {
+        setBusy(true);
+        setConnecting(true);
+        setRoomError("");
+        try {
+            setStatus(await within(startRoom(relayUrl, code), 15000, "Room connection did not answer within 15 seconds. Check backend status above."));
+        }
+        catch (caught) {
+            setRoomError(errorMessage(caught));
+        }
+        finally {
+            setConnecting(false);
+            setBusy(false);
+        }
+    };
+    const disconnectRoom = async () => {
+        setBusy(true);
+        setRoomError("");
+        try {
+            setStatus(await stopRoom());
+        }
+        catch (caught) {
+            setRoomError(errorMessage(caught));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const toggleAudio = async (which) => {
+        setBusy(true);
+        setError("");
+        try {
+            setStatus(which === "microphone"
+                ? await setMicrophone(!status?.microphone_enabled)
+                : await setSpeaker(!status?.speaker_enabled));
+        }
+        catch (caught) {
+            setError(String(caught));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    return SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs(DFL.PanelSection, { title: "Stream Share", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: "For EmuDeck GBA: set up once, restart ES-DE, then launch the game. Connect to a room and start the view." }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running || !!statusError, onClick: () => void setupGba("prepare"), children: status?.gba_prepared ? "Refresh GBA setup" : "Set up GBA sharing" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.gba_running ? "Stream Share GBA game detected" : status?.gba_prepared ? "Ready for GBA launch in ES-DE" : "GBA sharing not set up" }), status?.setup_message && SP_JSX.jsx(DFL.PanelSectionRow, { children: status.setup_message }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy || (!!status?.running && status?.mode !== "direct"), onClick: () => void changeLayout(), children: ["Layout: ", layoutNames[status?.layout || "side"], " (change)"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("pattern"), children: "Check display layer" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running || !status?.gba_running, onClick: () => void run("direct"), children: "Start GBA split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.running, onClick: () => void stop(), children: "Stop split view" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: status?.message || "Loading status..." }), statusError && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { color: "#ffb4a9", overflowWrap: "anywhere" }, children: statusError }) }), error && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { children: ["Error: ", error] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setShowLogs(!showLogs), children: showLogs ? "Hide logs" : "Show logs" }) }), showLogs && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["UI ", FRONTEND_BUILD, "; backend ", statusError ? "no response" : status?.backend_version || "unknown"] }), showLogs && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Last action: ", lastAction] }), showLogs && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Backend status: ", statusError || "connected"] }), showLogs && status?.gba_diagnostic && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.gba_diagnostic }) }), showLogs && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void run("live"), children: "Legacy captured view (other games)" }) }), showLogs && status?.gba_prepared && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.running, onClick: () => void setupGba("disable"), children: "Disable GBA sharing for next launch" }) }), showLogs && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void setupGba("restore"), children: "Restore ES-DE GBA settings" }) }), showLogs && status?.capture_diagnostic && SP_JSX.jsx(DFL.PanelSectionRow, { children: status.capture_diagnostic }), showLogs && status?.log && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }, children: status.log }) })] }), SP_JSX.jsxs(DFL.PanelSection, { title: "PC relay", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "PC relay URL", value: relayUrl, onChange: event => { relayLoaded.current = true; setRelayUrl(event.target.value); } }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "Friend's room code", value: joinCode, onChange: event => setJoinCode(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected, onClick: () => void connectRoom(""), children: "Create room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !!status?.room_connected || !joinCode.trim(), onClick: () => void connectRoom(joinCode), children: "Join room" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: busy || !status?.room_connected, onClick: () => void disconnectRoom(), children: "Leave room" }) }), status?.room_code && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Room code: ", status.room_code] }), SP_JSX.jsx(DFL.PanelSectionRow, { children: connecting ? "Connecting to PC relay…" : (status?.relay_message || "Not connected") }), roomError && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: { color: "#ffb4a9", overflowWrap: "anywhere" }, children: ["Error: ", roomError] }) }), showLogs && !!status?.room_connected && SP_JSX.jsxs(DFL.PanelSectionRow, { children: ["Video frames: sent ", status.sent_frames, ", received ", status.received_frames] }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("microphone"), children: ["Microphone: ", status.microphone_enabled ? "On" : "Off"] }) }), !!status?.room_connected && SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", disabled: busy, onClick: () => void toggleAudio("speaker"), children: ["Friend audio: ", status.speaker_enabled ? "On" : "Off"] }) })] })] });
 }
 var index = definePlugin(() => ({
-    name: "Stream Share Probe",
-    titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Stream Share Probe" }),
+    name: "Stream Share",
+    titleView: SP_JSX.jsx("div", { className: DFL.staticClasses.Title, children: "Stream Share" }),
     content: SP_JSX.jsx(Content, {}),
     icon: SP_JSX.jsx(FaDesktop, {}),
 }));

@@ -25,7 +25,7 @@ class BackendTest(unittest.TestCase):
             self.assertEqual(env["PIPEWIRE_RUNTIME_DIR"], f"/run/user/{os.getuid()}")
             self.assertEqual(env["PIPEWIRE_REMOTE"], "pipewire-0")
 
-    def test_probe_rejects_unknown_mode_without_starting_a_process(self):
+    def test_view_rejects_unknown_mode_without_starting_a_process(self):
         import asyncio
 
         with tempfile.TemporaryDirectory() as root:
@@ -38,11 +38,12 @@ class BackendTest(unittest.TestCase):
             async def check():
                 plugin = module.Plugin()
                 await plugin._main()
-                with self.assertRaisesRegex(ValueError, "Unknown probe mode"):
-                    await plugin.start_probe("anything")
+                with self.assertRaisesRegex(ValueError, "Unknown view mode"):
+                    await plugin.start_view("anything")
                 self.assertFalse((await plugin.get_status())["running"])
 
             asyncio.run(check())
+
 
     def test_extracted_helper_can_be_made_executable(self):
         decky = types.SimpleNamespace(logger=logging.getLogger("probe-test"))
@@ -76,6 +77,98 @@ class BackendTest(unittest.TestCase):
                 self.assertEqual((await plugin.set_layout("stack"))["layout"], "stack")
 
             asyncio.run(check())
+
+    def test_direct_view_restores_full_screen_if_renderer_cannot_start(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as root:
+            decky = types.SimpleNamespace(DECKY_PLUGIN_RUNTIME_DIR=root,
+                                          logger=logging.getLogger("stream-share-rollback"))
+            with patch.dict(sys.modules, {"decky": decky}):
+                spec = importlib.util.spec_from_file_location(
+                    "stream_share_rollback", Path(__file__).parents[1] / "main.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+            async def check():
+                plugin = module.Plugin()
+                await plugin._main()
+                with patch.object(module, "ensure_helper_executable"), \
+                     patch.object(module.shutil, "which", return_value="/usr/bin/gst-launch-1.0"), \
+                     patch.object(module.load_gba_setup(), "set_layout") as set_layout, \
+                     patch.object(module.load_gba_setup(), "active", return_value=True), \
+                     patch.object(module.subprocess, "Popen", side_effect=OSError("renderer failed")):
+                    with self.assertRaisesRegex(OSError, "renderer failed"):
+                        await plugin.start_view("direct")
+                    self.assertEqual([call.args[0] for call in set_layout.call_args_list],
+                                     ["side", "full"])
+                    self.assertEqual(plugin.mode, "")
+                    self.assertIsNone(plugin.log_handle)
+
+            asyncio.run(check())
+
+    def test_missing_gba_integration_does_not_stop_status(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as root:
+            decky = types.SimpleNamespace(DECKY_PLUGIN_RUNTIME_DIR=root,
+                                          logger=logging.getLogger("stream-share-status"))
+            with patch.dict(sys.modules, {"decky": decky}):
+                spec = importlib.util.spec_from_file_location(
+                    "stream_share_optional_gba", Path(__file__).parents[1] / "main.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+            async def check():
+                plugin = module.Plugin()
+                await plugin._main()
+                with patch.object(module, "load_gba_setup", side_effect=ImportError("missing RetroArch support")), \
+                     patch.object(decky.logger, "exception"):
+                    status = await plugin.get_status()
+                    self.assertFalse(status["gba_prepared"])
+                    self.assertIn("missing RetroArch support", status["setup_message"])
+                    self.assertIn("ImportError", status["gba_diagnostic"])
+                    with self.assertRaisesRegex(ImportError, "missing RetroArch support"):
+                        await plugin.prepare_gba()
+                    self.assertIn("ImportError", plugin.gba_diagnostic)
+
+            asyncio.run(check())
+
+
+class BackendRoomTest(unittest.IsolatedAsyncioTestCase):
+    async def test_room_starts_even_if_url_setting_cannot_be_saved(self):
+        from aiohttp import web
+        from relay.server import create_app
+
+        runner = web.AppRunner(create_app())
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                decky = types.SimpleNamespace(
+                    DECKY_PLUGIN_RUNTIME_DIR=root,
+                    DECKY_PLUGIN_SETTINGS_DIR=root,
+                    logger=logging.getLogger("stream-share-room-test"),
+                )
+                with patch.dict(sys.modules, {"decky": decky}):
+                    spec = importlib.util.spec_from_file_location(
+                        "stream_share_room_test", Path(__file__).parents[1] / "main.py"
+                    )
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                plugin = module.Plugin()
+                await plugin._main()
+                try:
+                    with patch.object(Path, "write_text", side_effect=OSError("read-only settings")):
+                        status = await plugin.start_room(f"http://127.0.0.1:{port}")
+                    self.assertTrue(status["room_connected"])
+                    self.assertEqual(len(status["room_code"]), 6)
+                finally:
+                    await plugin.stop_room()
+        finally:
+            await runner.cleanup()
 
 
 if __name__ == "__main__":
