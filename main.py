@@ -10,6 +10,7 @@ from pathlib import Path
 import decky
 from relay.audio import AudioBridge
 from relay.client import RelayConnection
+from retroarch import setup as gba_setup
 
 
 def external_program_env() -> dict[str, str]:
@@ -167,7 +168,7 @@ class Plugin:
             await writer.wait_closed()
 
     async def start_view(self, mode: str):
-        if mode not in ("pattern", "live"):
+        if mode not in ("pattern", "live", "direct"):
             raise ValueError("Unknown view mode")
         if self.process and self.process.poll() is None:
             raise RuntimeError("Split view is already running")
@@ -175,7 +176,7 @@ class Plugin:
             await self.stop_view()
         helper = Path(__file__).resolve().parent / "bin" / "stream-share-renderer"
         ensure_helper_executable(helper)
-        if mode == "live" and not shutil.which("gst-launch-1.0"):
+        if mode in ("live", "direct") and not shutil.which("gst-launch-1.0"):
             raise RuntimeError("GStreamer is unavailable on this SteamOS installation")
         if self.log_handle:
             self.log_handle.close()
@@ -185,7 +186,7 @@ class Plugin:
         self.received_frames = 0
         self.capture_diagnostic = ""
         env = external_program_env()
-        if mode == "live":
+        if mode in ("live", "direct"):
             socket = Path(env["PIPEWIRE_RUNTIME_DIR"]) / env["PIPEWIRE_REMOTE"]
             self.capture_diagnostic = (
                 f"PipeWire: uid={os.getuid()}, socket={socket}, "
@@ -194,14 +195,16 @@ class Plugin:
             self.log_handle.write(self.capture_diagnostic + "\n")
             self.log_handle.flush()
         args = [str(helper), "--mode", mode, "--layout", self.layout]
-        if mode == "live" and self.connection and not self.connection.closed:
-            self.media_socket_path.unlink(missing_ok=True)
-            self.media_server = await asyncio.start_unix_server(
-                self._handle_media, path=str(self.media_socket_path)
-            )
-            self.media_socket_path.chmod(0o600)
-            args += ["--ipc", str(self.media_socket_path)]
         try:
+            if mode in ("live", "direct") and self.connection and not self.connection.closed:
+                self.media_socket_path.unlink(missing_ok=True)
+                self.media_server = await asyncio.start_unix_server(
+                    self._handle_media, path=str(self.media_socket_path)
+                )
+                self.media_socket_path.chmod(0o600)
+                args += ["--ipc", str(self.media_socket_path)]
+            if mode == "direct":
+                await asyncio.to_thread(gba_setup.set_layout, self.layout)
             self.process = subprocess.Popen(
                 args,
                 stdin=subprocess.DEVNULL,
@@ -215,20 +218,59 @@ class Plugin:
                 self.media_server.close()
                 await self.media_server.wait_closed()
                 self.media_server = None
-                self.media_socket_path.unlink(missing_ok=True)
+            self.media_socket_path.unlink(missing_ok=True)
+            if mode == "direct" and gba_setup.active():
+                try:
+                    await asyncio.to_thread(gba_setup.set_layout, "full")
+                except RuntimeError:
+                    pass
+            self.mode = ""
+            self.log_handle.close()
+            self.log_handle = None
             raise
         await asyncio.sleep(0.5)
+        if mode == "direct" and self.process.poll() is not None and gba_setup.active():
+            try:
+                await asyncio.to_thread(gba_setup.set_layout, "full")
+            except RuntimeError:
+                pass
         return await self.get_status()
 
     async def set_layout(self, layout: str):
-        if layout not in ("side", "wide", "stack"):
+        if layout not in ("side", "wide", "stack", "full"):
             raise ValueError("Unknown split-view layout")
         if self.process and self.process.poll() is None:
-            raise RuntimeError("Stop split view before changing its layout")
+            if self.mode != "direct":
+                raise RuntimeError("Stop split view before changing its layout")
+            await self.stop_view()
+            self.layout = layout
+            return await self.start_view("direct")
         self.layout = layout
         return await self.get_status()
 
+    async def prepare_gba(self):
+        message = await asyncio.to_thread(gba_setup.install)
+        status = await self.get_status()
+        status["setup_message"] = message
+        return status
+
+    async def disable_gba(self):
+        message = await asyncio.to_thread(gba_setup.disarm)
+        status = await self.get_status()
+        status["setup_message"] = message
+        return status
+
+    async def restore_gba(self):
+        if self.process and self.process.poll() is None:
+            await self.stop_view()
+        message = await asyncio.to_thread(gba_setup.restore_esde)
+        status = await self.get_status()
+        status["setup_message"] = message
+        return status
+
     async def stop_view(self):
+        was_direct = self.mode == "direct"
+        restore_error = ""
         if self.process and self.process.poll() is None:
             self.process.terminate()
             try:
@@ -238,6 +280,11 @@ class Plugin:
                 await asyncio.to_thread(self.process.wait)
         self.process = None
         self.mode = ""
+        if was_direct and gba_setup.active():
+            try:
+                await asyncio.to_thread(gba_setup.set_layout, "full")
+            except RuntimeError as exc:
+                restore_error = str(exc)
         if self.media_writer:
             self.media_writer.close()
             await self.media_writer.wait_closed()
@@ -250,13 +297,16 @@ class Plugin:
         if self.log_handle:
             self.log_handle.close()
             self.log_handle = None
-        return await self.get_status()
+        status = await self.get_status()
+        if restore_error:
+            status["message"] = f"View stopped, but RetroArch did not restore full screen: {restore_error}"
+        return status
 
     async def get_status(self):
         running = self.process is not None and self.process.poll() is None
         exit_code = None if self.process is None else self.process.poll()
         if running:
-            message = f"{self.mode.title()} split view running ({self.layout}). Return to the game."
+            message = f"Split view running ({self.layout}). Return to the game."
         elif exit_code is not None and exit_code != 0:
             message = f"Split view stopped with exit code {exit_code}. Open Show logs for details."
         else:
@@ -276,4 +326,7 @@ class Plugin:
                 "relay_message": connection.message if connection else "Not connected",
                 "sent_frames": self.sent_frames, "received_frames": self.received_frames,
                 "microphone_enabled": bool(self.audio and self.audio.microphone_enabled),
-                "speaker_enabled": bool(self.audio and self.audio.speaker_enabled)}
+                "speaker_enabled": bool(self.audio and self.audio.speaker_enabled),
+                "gba_prepared": (gba_setup.DATA / "armed").exists(),
+                "gba_running": gba_setup.active(),
+                "setup_message": ""}

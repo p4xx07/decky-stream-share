@@ -4,6 +4,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/shape.h>
+#include <X11/extensions/Xrender.h>
 
 #include <algorithm>
 #include <atomic>
@@ -58,7 +59,9 @@ bool read_frame(int fd, std::vector<unsigned char> &frame) {
     return offset == frame.size();
 }
 
-bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
+bool start_capture(Capture &capture, bool synthetic, bool direct, int display_width,
+                   int display_height, int crop_left, int crop_top,
+                   int crop_width, int crop_height, MediaBridge *bridge) {
     int pipefd[2];
     if (pipe(pipefd) != 0) return false;
     capture.pid = fork();
@@ -78,19 +81,34 @@ bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
                    "video/x-raw,format=BGRx,width=640,height=400,framerate=30/1", "!",
                    "fdsink", "fd=1", "sync=false", static_cast<char *>(nullptr));
         } else {
-            execlp("gst-launch-1.0", "gst-launch-1.0", "-q", "pipewiresrc",
-                   "target-object=gamescope", "do-timestamp=true", "!", "queue",
-                   "leaky=downstream", "max-size-buffers=1", "!", "videoconvert", "!",
-                   "videoscale", "!", "videorate", "drop-only=true", "!",
-                   "video/x-raw,format=BGRx,width=640,height=400,framerate=30/1", "!",
-                   "fdsink", "fd=1", "sync=false", static_cast<char *>(nullptr));
+            std::vector<std::string> args = {
+                "gst-launch-1.0", "-q", "pipewiresrc", "target-object=gamescope",
+                "do-timestamp=true", "!", "queue", "leaky=downstream",
+                "max-size-buffers=1", "!", "videoconvert", "!", "videoscale", "!"};
+            if (direct) {
+                args.push_back("video/x-raw,format=BGRx,width=" + std::to_string(display_width) +
+                               ",height=" + std::to_string(display_height));
+                args.insert(args.end(), {"!", "videocrop",
+                    "left=" + std::to_string(crop_left),
+                    "top=" + std::to_string(crop_top),
+                    "right=" + std::to_string(display_width - crop_left - crop_width),
+                    "bottom=" + std::to_string(display_height - crop_top - crop_height),
+                    "!", "videoscale", "add-borders=true", "!"});
+            }
+            args.insert(args.end(), {"videorate", "drop-only=true", "!",
+                "video/x-raw,format=BGRx,width=640,height=400,framerate=30/1",
+                "!", "fdsink", "fd=1", "sync=false"});
+            std::vector<char *> argv;
+            for (auto &arg : args) argv.push_back(arg.data());
+            argv.push_back(nullptr);
+            execvp(argv[0], argv.data());
         }
         std::perror("Could not start gst-launch-1.0");
         _exit(127);
     }
     close(pipefd[1]);
     capture.fd = pipefd[0];
-    capture.reader = std::thread([&capture, bridge] {
+    capture.reader = std::thread([&capture, bridge, direct] {
         std::vector<unsigned char> frame(kCaptureBytes);
         auto next_share = std::chrono::steady_clock::now();
         while (read_frame(capture.fd, frame)) {
@@ -105,7 +123,7 @@ bool start_capture(Capture &capture, bool synthetic, MediaBridge *bridge) {
                 // Keep the read buffer allocated for the next full frame. Swapping
                 // leaves it empty, so the next read appears to succeed immediately
                 // and clears the local image before the display loop can use it.
-                capture.latest = frame;
+                if (!direct) capture.latest = frame;
                 count = ++capture.frames;
             }
             capture.updated.notify_one();
@@ -146,7 +164,7 @@ struct Rect {
 
 void render(XImage *image, const std::vector<unsigned char> &frame,
             const std::vector<unsigned char> &remote, bool pattern,
-            const Rect &game, const Rect &friend_view) {
+            bool direct, const Rect &game, const Rect &friend_view) {
     const int width = image->width;
     const int height = image->height;
     const int fitted_width = std::min(game.width, game.height * kCaptureWidth / kCaptureHeight);
@@ -156,9 +174,11 @@ void render(XImage *image, const std::vector<unsigned char> &frame,
 
     for (int y = 0; y < height; ++y) {
         auto *row = reinterpret_cast<uint32_t *>(image->data + y * image->bytes_per_line);
-        std::fill_n(row, width, 0x00000000);
+        std::fill_n(row, width, direct ? 0x00000000 : 0xff000000);
+        if (direct && y >= friend_view.y && y < friend_view.y + friend_view.height)
+            std::fill_n(row + friend_view.x, friend_view.width, 0xff000000);
     }
-    if (!frame.empty() || pattern) {
+    if (!direct && (!frame.empty() || pattern)) {
         for (int y = 0; y < fitted_height; ++y) {
             auto *row = reinterpret_cast<uint32_t *>(image->data + (fitted_y + y) * image->bytes_per_line);
             const int source_y = y * kCaptureHeight / fitted_height;
@@ -167,11 +187,11 @@ void render(XImage *image, const std::vector<unsigned char> &frame,
                     const int stripe = (x * 6 / fitted_width);
                     constexpr uint32_t colors[] = {0x00e53935, 0x00fdd835, 0x0043a047,
                                                     0x001e88e5, 0x008e24aa, 0x00f5f5f5};
-                    row[fitted_x + x] = colors[stripe];
+                    row[fitted_x + x] = 0xff000000 | colors[stripe];
                 } else {
                     const int source_x = x * kCaptureWidth / fitted_width;
                     const auto *source = frame.data() + (source_y * kCaptureWidth + source_x) * 4;
-                    row[fitted_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
+                    row[fitted_x + x] = 0xff000000 | uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
                                       (uint32_t(source[2]) << 16);
                 }
             }
@@ -190,7 +210,7 @@ void render(XImage *image, const std::vector<unsigned char> &frame,
             for (int x = 0; x < friend_width; ++x) {
                 const int source_x = x * kCaptureWidth / friend_width;
                 const auto *source = remote.data() + (source_y * kCaptureWidth + source_x) * 4;
-                row[friend_x + x] = uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
+                row[friend_x + x] = 0xff000000 | uint32_t(source[0]) | (uint32_t(source[1]) << 8) |
                                     (uint32_t(source[2]) << 16);
             }
         }
@@ -202,13 +222,15 @@ int main(int argc, char **argv) {
     if ((argc != 5 && argc != 7) || std::strcmp(argv[1], "--mode") != 0 ||
         std::strcmp(argv[3], "--layout") != 0 ||
         (argc == 7 && std::strcmp(argv[5], "--ipc") != 0)) {
-        std::fprintf(stderr, "Usage: stream-share-renderer --mode pattern|synthetic|live --layout side|wide|stack [--ipc socket]\n");
+        std::fprintf(stderr, "Usage: stream-share-renderer --mode pattern|synthetic|live|direct|direct-test|direct-pattern --layout side|wide|stack|full [--ipc socket]\n");
         return 2;
     }
     const std::string mode(argv[2]);
-    if (mode != "pattern" && mode != "synthetic" && mode != "live") return 2;
+    if (mode != "pattern" && mode != "synthetic" && mode != "live" &&
+        mode != "direct" && mode != "direct-test" && mode != "direct-pattern") return 2;
+    const bool direct = mode == "direct" || mode == "direct-test" || mode == "direct-pattern";
     const std::string layout(argv[4]);
-    if (layout != "side" && layout != "wide" && layout != "stack") return 2;
+    if (layout != "side" && layout != "wide" && layout != "stack" && layout != "full") return 2;
     const std::string ipc_path = argc == 7 ? argv[6] : "";
     // An orphaned full-screen layer would be difficult to dismiss in Gaming Mode.
     const pid_t parent = getppid();
@@ -232,7 +254,10 @@ int main(int argc, char **argv) {
     }
     Rect game{};
     Rect friend_view{};
-    if (layout == "stack") {
+    if (layout == "full") {
+        game = {0, 0, width, height};
+        friend_view = {0, 0, 0, 0};
+    } else if (layout == "stack") {
         game = {0, 0, width, height / 2};
         friend_view = {0, height / 2, width, height - height / 2};
     } else {
@@ -241,6 +266,19 @@ int main(int argc, char **argv) {
         friend_view = {game_width, 0, width - game_width, height};
     }
     Visual *visual = DefaultVisual(display, screen);
+    int depth = DefaultDepth(display, screen);
+    if (direct) {
+        XVisualInfo visual_info{};
+        if (!XMatchVisualInfo(display, screen, 32, TrueColor, &visual_info) ||
+            !XRenderFindVisualFormat(display, visual_info.visual) ||
+            XRenderFindVisualFormat(display, visual_info.visual)->direct.alphaMask == 0) {
+            std::fprintf(stderr, "Gamescope X display has no ARGB visual; direct mode unavailable.\n");
+            XCloseDisplay(display);
+            return 4;
+        }
+        visual = visual_info.visual;
+        depth = visual_info.depth;
+    }
     if (visual->red_mask != 0x00ff0000 || visual->green_mask != 0x0000ff00 ||
         visual->blue_mask != 0x000000ff) {
         std::fprintf(stderr, "Unsupported X11 pixel format for the split view.\n");
@@ -249,7 +287,14 @@ int main(int argc, char **argv) {
     }
 
     const Window root = RootWindow(display, screen);
-    Window window = XCreateSimpleWindow(display, root, 0, 0, width, height, 0, 0, 0);
+    Colormap colormap = XCreateColormap(display, root, visual, AllocNone);
+    XSetWindowAttributes attributes{};
+    attributes.colormap = colormap;
+    attributes.background_pixel = 0;
+    attributes.border_pixel = 0;
+    Window window = XCreateWindow(display, root, 0, 0, width, height, 0, depth,
+                                  InputOutput, visual, CWColormap | CWBackPixel | CWBorderPixel,
+                                  &attributes);
     Atom overlay = XInternAtom(display, "GAMESCOPE_EXTERNAL_OVERLAY", False);
     unsigned long enabled = 1;
     XChangeProperty(display, window, overlay, XA_CARDINAL, 32, PropModeReplace,
@@ -266,12 +311,13 @@ int main(int argc, char **argv) {
     XMapRaised(display, window);
     XFlush(display);
 
-    XImage *image = XCreateImage(display, visual, DefaultDepth(display, screen), ZPixmap,
+    XImage *image = XCreateImage(display, visual, depth, ZPixmap,
                                  0, nullptr, width, height, 32, 0);
     if (!image || image->bits_per_pixel != 32 || image->byte_order != LSBFirst) {
         std::fprintf(stderr, "Unsupported X11 image depth.\n");
         if (image) XDestroyImage(image);
         XDestroyWindow(display, window);
+        XFreeColormap(display, colormap);
         XCloseDisplay(display);
         return 4;
     }
@@ -280,6 +326,7 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "Could not allocate display image.\n");
         XDestroyImage(image);
         XDestroyWindow(display, window);
+        XFreeColormap(display, colormap);
         XCloseDisplay(display);
         return 5;
     }
@@ -289,17 +336,21 @@ int main(int argc, char **argv) {
         XFreeGC(display, gc);
         XDestroyImage(image);
         XDestroyWindow(display, window);
+        XFreeColormap(display, colormap);
         XCloseDisplay(display);
         return 9;
     }
     Capture capture;
-    if (mode != "pattern" && !start_capture(capture, mode == "synthetic",
-                                              ipc_path.empty() ? nullptr : &bridge)) {
+    if (mode != "pattern" && mode != "direct-pattern" &&
+        !start_capture(capture, mode == "synthetic" || mode == "direct-test", direct,
+                                              width, height, game.x, game.y, game.width,
+                                              game.height, ipc_path.empty() ? nullptr : &bridge)) {
         std::fprintf(stderr, "Could not start capture process.\n");
         bridge.stop();
         XFreeGC(display, gc);
         XDestroyImage(image);
         XDestroyWindow(display, window);
+        XFreeColormap(display, colormap);
         XCloseDisplay(display);
         return 6;
     }
@@ -311,14 +362,14 @@ int main(int argc, char **argv) {
     unsigned long last_displayed_capture = 0;
     std::vector<unsigned char> frame;
     const auto started = std::chrono::steady_clock::now();
-    const auto limit = mode == "pattern" ? std::chrono::seconds(45) :
+    const auto limit = mode == "pattern" || mode == "direct-pattern" ? std::chrono::seconds(45) :
                        (ipc_path.empty() ? std::chrono::seconds(90) : std::chrono::hours(4));
     while (running) {
         if (std::chrono::steady_clock::now() - started >= limit) {
             std::fprintf(stderr, "Split view time limit reached; closing overlay.\n");
             break;
         }
-        if (mode != "pattern") {
+        if (mode != "pattern" && !direct) {
             std::unique_lock<std::mutex> lock(capture.mutex);
             capture.updated.wait_for(lock, std::chrono::milliseconds(100), [&] {
                 return capture.frames != last_displayed_capture || capture.done || !running;
@@ -329,7 +380,7 @@ int main(int argc, char **argv) {
             }
         }
         const std::vector<unsigned char> remote = bridge.remote_frame();
-        render(image, frame, remote, mode == "pattern", game, friend_view);
+        render(image, frame, remote, mode == "pattern", direct, game, friend_view);
         XPutImage(display, window, gc, image, 0, 0, 0, 0, width, height);
         if (!frame.empty() && ++displayed_local_frames == 10) {
             std::fprintf(stderr, "Displayed 10 local game frames.\n");
@@ -341,13 +392,15 @@ int main(int argc, char **argv) {
             result = 7;
             break;
         }
-        if (mode == "pattern") std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (mode == "pattern" || direct)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     stop_capture(capture);
     bridge.stop();
     XFreeGC(display, gc);
     XDestroyImage(image);
     XDestroyWindow(display, window);
+    XFreeColormap(display, colormap);
     XCloseDisplay(display);
     return result;
 }

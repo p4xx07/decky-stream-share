@@ -78,6 +78,35 @@ class BackendTest(unittest.TestCase):
 
             asyncio.run(check())
 
+    def test_direct_view_restores_full_screen_if_renderer_cannot_start(self):
+        import asyncio
+
+        with tempfile.TemporaryDirectory() as root:
+            decky = types.SimpleNamespace(DECKY_PLUGIN_RUNTIME_DIR=root,
+                                          logger=logging.getLogger("stream-share-rollback"))
+            with patch.dict(sys.modules, {"decky": decky}):
+                spec = importlib.util.spec_from_file_location(
+                    "stream_share_rollback", Path(__file__).parents[1] / "main.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+            async def check():
+                plugin = module.Plugin()
+                await plugin._main()
+                with patch.object(module, "ensure_helper_executable"), \
+                     patch.object(module.shutil, "which", return_value="/usr/bin/gst-launch-1.0"), \
+                     patch.object(module.gba_setup, "set_layout") as set_layout, \
+                     patch.object(module.gba_setup, "active", return_value=True), \
+                     patch.object(module.subprocess, "Popen", side_effect=OSError("renderer failed")):
+                    with self.assertRaisesRegex(OSError, "renderer failed"):
+                        await plugin.start_view("direct")
+                    self.assertEqual([call.args[0] for call in set_layout.call_args_list],
+                                     ["side", "full"])
+                    self.assertEqual(plugin.mode, "")
+                    self.assertIsNone(plugin.log_handle)
+
+            asyncio.run(check())
+
 
 class BackendRoomTest(unittest.IsolatedAsyncioTestCase):
     async def test_room_starts_even_if_url_setting_cannot_be_saved(self):

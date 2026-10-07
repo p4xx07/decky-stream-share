@@ -30,6 +30,8 @@ cloudflared tunnel --url http://localhost:57322
 
 Copy the temporary `https://...trycloudflare.com` URL into **both Decks**. Create a room on one Deck and join its code on the other. [Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) URLs change when restarted; they are intended for testing.
 
+For a stable URL without buying a domain, [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) is an option. Install and sign in to Tailscale on the relay computer, then run `tailscale funnel --bg 57322`. Tailscale shows an `https://<machine>.<tailnet>.ts.net` address; enter that as the relay URL on both Decks and use `<address>/d.zip` for installation. Funnel has bandwidth limits, so test video quality before using it with friends. The relay must still be running on the computer.
+
 For Decks on the **same LAN**, start the relay with `--host 0.0.0.0` and enter `http://<PC-LAN-IP>:57322` on both Decks. Only do this on a trusted network. The relay does not require a PC display or Steam installation.
 
 If the URL fails, visit `<relay URL>/health` in a browser. It should return `{"ok": true, ...}`. Local firewalls and sleep settings can prevent access.

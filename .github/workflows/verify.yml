@@ -22,9 +22,13 @@ jobs:
       - name: Test renderer in a virtual X display
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev xvfb gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+          sudo apt-get install -y libx11-dev libxext-dev libxrender-dev glslang-tools xvfb gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+          python3 tests/shader_compile.py
           sh backend/build.sh
+          g++ -std=c++17 -Wall -Wextra tests/overlay_alpha_smoke.cpp -o /tmp/overlay-alpha-smoke -lX11
           xvfb-run -a sh -c 'set -eu; for layout in side wide stack; do ./bin/stream-share-renderer --mode synthetic --layout "$layout" > "/tmp/stream-share-$layout.log" 2>&1 & renderer_pid=$!; sleep 3; kill "$renderer_pid" 2>/dev/null || true; if ! wait "$renderer_pid"; then cat "/tmp/stream-share-$layout.log"; exit 1; fi; if ! grep -q "Captured" "/tmp/stream-share-$layout.log"; then cat "/tmp/stream-share-$layout.log"; exit 1; fi; done'
+          xvfb-run -a sh tests/overlay_alpha_smoke.sh
+          xvfb-run -a sh -c 'set -eu; for layout in side wide stack full; do ./bin/stream-share-renderer --mode direct-test --layout "$layout" > "/tmp/stream-share-direct-$layout.log" 2>&1 & renderer_pid=$!; sleep 3; kill "$renderer_pid" 2>/dev/null || true; if ! wait "$renderer_pid"; then cat "/tmp/stream-share-direct-$layout.log"; exit 1; fi; if ! grep -q "Captured" "/tmp/stream-share-direct-$layout.log"; then cat "/tmp/stream-share-direct-$layout.log"; exit 1; fi; done'
           xvfb-run -a python3 tests/media_bridge_smoke.py
           xvfb-run -a python3 -m tests.relay_native_smoke
           python3 -m tests.audio_bridge_smoke
@@ -32,14 +36,18 @@ jobs:
         run: |
           docker build -f backend/Dockerfile -t stream-share-build .
           docker run --rm -v "$PWD":/work -w /work stream-share-build sh backend/build.sh
+      - name: Check live shader switching in RetroArch
+        run: |
+          docker build -f backend/Dockerfile.retroarch-test -t stream-share-retroarch-test .
+          docker run --rm -v "$PWD":/work -w /work stream-share-retroarch-test sh tests/run_retroarch_runtime_smoke.sh
       - run: python3 package_plugin.py
-      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.6.zip
-      - run: python3 tests/relay_package_smoke.py StreamShareRelay-0.1.0-alpha.6.zip StreamShare-0.1.0-alpha.6.zip
-      - run: unzip -t StreamShare-0.1.0-alpha.6.zip
-      - run: unzip -t StreamShareRelay-0.1.0-alpha.6.zip
+      - run: python3 tests/decky_import_smoke.py StreamShare-0.1.0-alpha.7.zip
+      - run: python3 tests/relay_package_smoke.py StreamShareRelay-0.1.0-alpha.7.zip StreamShare-0.1.0-alpha.7.zip
+      - run: unzip -t StreamShare-0.1.0-alpha.7.zip
+      - run: unzip -t StreamShareRelay-0.1.0-alpha.7.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: StreamShare-0.1.0-alpha.6
+          name: StreamShare-0.1.0-alpha.7
           path: |
-            StreamShare-0.1.0-alpha.6.zip
-            StreamShareRelay-0.1.0-alpha.6.zip
+            StreamShare-0.1.0-alpha.7.zip
+            StreamShareRelay-0.1.0-alpha.7.zip

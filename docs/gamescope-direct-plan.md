@@ -1,19 +1,15 @@
-# Direct game pane prototype
+# Direct GBA pane: implementation and Deck gate
 
-The current Decky overlay draws a captured copy of the local game. It now wakes when a captured frame arrives and can draw up to 30 fps, but capture and CPU copies still add work and delay while a demanding game is running.
+The alpha 7 candidate adds a RetroArch mGBA path. A session-only Slang shader places the live game in the selected pane. The Gamescope external overlay uses an ARGB window that is transparent over the game and opaque over the friend pane. Outbound PipeWire capture crops the local pane before JPEG encoding. RetroArch keeps game input and presentation; Stream Share never sends controller input to the friend.
 
-## Proposed route
+Decky installs a GBA command in ES-DE's user `custom_systems/es_systems.xml` and backs up the original file. The command launches a small user-owned wrapper. When GBA sharing is armed, the wrapper gives RetroArch a session-only config and writes shader changes to its stdin over a private Unix socket. It does not turn on RetroArch's public network command interface. Disabling sharing lets later GBA launches use the normal RetroArch command; **Restore ES-DE GBA settings** restores the exact original file if it has not been edited since setup.
 
-1. Prototype a user-owned Gamescope fork launched **per game** in nested mode. Do not replace SteamOS's running Gamescope or modify system files.
-2. In that compositor, place the focused game's existing GPU texture in the selected local pane. Clip it to that pane, preserve aspect ratio, and map pointer input through the same transform.
-3. Draw only the decoded friend video and black unused area in the other pane. The Decky plugin controls layout and audio over a local socket.
-4. Capture the game before the split composition for outbound streaming, so the friend receives the full game without the local layout or a recursive overlay.
+## Hardware gate
 
-Gamescope currently paints the focused game as its base layer and an external overlay as a separate layer. Its public overlay mechanism does not expose a transform for the base game plane. The relevant path is [`paint_all` in Gamescope](https://github.com/ValveSoftware/gamescope/blob/master/src/steamcompmgr.cpp). A nested fork is a feasibility proposal, not yet a working Deck build.
+1. Install the candidate ZIP on one Deck. Press **Set up GBA sharing**, fully restart ES-DE, and launch Pokémon Emerald with the **mGBA RetroArch** emulator.
+2. Confirm **Stream Share GBA game detected** appears. Join the Mac browser client, send its test image, and start **GBA split view**.
+3. Check that the local game is in the left pane, responsive, and receives controls. Change Side → Wide → Stack → Full during play. Check that stopping the view returns the game to full screen.
+4. Check the Mac receives the complete game, not the friend overlay or a recursively split frame. Measure local input feel against ordinary RetroArch launch.
+5. Only after that, repeat with two Decks, microphone and speaker enabled separately, then test a cross-network relay. Do not release this candidate as proven before these checks.
 
-## Gates before Deck installation
-
-- Build the fork as an unprivileged binary in a SteamOS-compatible container.
-- Use a moving test game and a synthetic friend stream under a virtual display. Verify both pane geometry and gamepad/pointer input.
-- Measure frame time against the same game without the wrapper. If nested presentation adds noticeable latency or fails to launch common games, stop this route.
-- Only then offer an optional per-game launch command on Deck. Exiting it must restore the normal game session without changing SteamOS files.
+Virtual X, shader compiler, launcher, package, and relay tests catch syntax, protocol, and process failures. They cannot establish Gamescope's ARGB blending or RetroArch's viewport behavior on a real Deck.

@@ -3,7 +3,7 @@ import { ButtonItem, PanelSection, PanelSectionRow, TextField, staticClasses } f
 import { useEffect, useRef, useState } from "react";
 import { FaDesktop } from "react-icons/fa";
 
-type Layout = "side" | "wide" | "stack";
+type Layout = "side" | "wide" | "stack" | "full";
 type StreamStatus = {
   running: boolean; mode: string; layout: Layout; message: string; log: string;
   capture_diagnostic: string;
@@ -11,6 +11,7 @@ type StreamStatus = {
   peer_connected: boolean; relay_message: string;
   sent_frames: number; received_frames: number;
   microphone_enabled: boolean; speaker_enabled: boolean;
+  gba_prepared: boolean; gba_running: boolean; setup_message: string;
 };
 const getStatus = callable<[], StreamStatus>("get_status");
 const startView = callable<[mode: string], StreamStatus>("start_view");
@@ -20,9 +21,12 @@ const startRoom = callable<[relayUrl: string, joinCode: string], StreamStatus>("
 const stopRoom = callable<[], StreamStatus>("stop_room");
 const setMicrophone = callable<[enabled: boolean], StreamStatus>("set_microphone");
 const setSpeaker = callable<[enabled: boolean], StreamStatus>("set_speaker");
-const layouts: Layout[] = ["side", "wide", "stack"];
+const prepareGba = callable<[], StreamStatus>("prepare_gba");
+const disableGba = callable<[], StreamStatus>("disable_gba");
+const restoreGba = callable<[], StreamStatus>("restore_gba");
+const layouts: Layout[] = ["side", "wide", "stack", "full"];
 const layoutNames: Record<Layout, string> = {
-  side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom",
+  side: "Equal side by side", wide: "Larger local game", stack: "Top and bottom", full: "Full local game",
 };
 
 async function within<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
@@ -71,7 +75,7 @@ function Content() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
-  const run = async (mode: "pattern" | "live") => {
+  const run = async (mode: "pattern" | "live" | "direct") => {
     setBusy(true);
     setError("");
     try { setStatus(await startView(mode)); }
@@ -94,6 +98,14 @@ function Content() {
       const next = layouts[(layouts.indexOf(current) + 1) % layouts.length];
       setStatus(await setViewLayout(next));
     } catch (caught) { setError(String(caught)); }
+    finally { setBusy(false); }
+  };
+
+  const setupGba = async (action: "prepare" | "disable" | "restore") => {
+    setBusy(true);
+    setError("");
+    try { setStatus(await (action === "prepare" ? prepareGba() : action === "disable" ? disableGba() : restoreGba())); }
+    catch (caught) { setError(errorMessage(caught)); }
     finally { setBusy(false); }
   };
 
@@ -129,14 +141,20 @@ function Content() {
 
   return <>
     <PanelSection title="Stream Share">
-      <PanelSectionRow>Start a game, connect both Decks to a room, then start split view. Your complete game fits in its pane beside your friend's game.</PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void changeLayout()}>Layout: {layoutNames[status?.layout || "side"]} (change)</ButtonItem></PanelSectionRow>
+      <PanelSectionRow>For EmuDeck GBA: set up once, restart ES-DE, then launch the game. Connect to a room and start the view.</PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void setupGba("prepare")}>{status?.gba_prepared ? "Refresh GBA setup" : "Set up GBA sharing"}</ButtonItem></PanelSectionRow>
+      <PanelSectionRow>{status?.gba_running ? "Stream Share GBA game detected" : status?.gba_prepared ? "Ready for GBA launch in ES-DE" : "GBA sharing not set up"}</PanelSectionRow>
+      {status?.setup_message && <PanelSectionRow>{status.setup_message}</PanelSectionRow>}
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || (!!status?.running && status?.mode !== "direct")} onClick={() => void changeLayout()}>Layout: {layoutNames[status?.layout || "side"]} (change)</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("pattern")}>Check display layer</ButtonItem></PanelSectionRow>
-      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("live")}>Start split view</ButtonItem></PanelSectionRow>
+      <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running || !status?.gba_running} onClick={() => void run("direct")}>Start GBA split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow><ButtonItem layout="below" disabled={busy || !status?.running} onClick={() => void stop()}>Stop split view</ButtonItem></PanelSectionRow>
       <PanelSectionRow>{status?.message || "Loading status..."}</PanelSectionRow>
       {error && <PanelSectionRow><div>Error: {error}</div></PanelSectionRow>}
       <PanelSectionRow><ButtonItem layout="below" onClick={() => setShowLogs(!showLogs)}>{showLogs ? "Hide logs" : "Show logs"}</ButtonItem></PanelSectionRow>
+      {showLogs && <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void run("live")}>Legacy captured view (other games)</ButtonItem></PanelSectionRow>}
+      {showLogs && status?.gba_prepared && <PanelSectionRow><ButtonItem layout="below" disabled={busy || !!status?.running} onClick={() => void setupGba("disable")}>Disable GBA sharing for next launch</ButtonItem></PanelSectionRow>}
+      {showLogs && <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={() => void setupGba("restore")}>Restore ES-DE GBA settings</ButtonItem></PanelSectionRow>}
       {showLogs && status?.capture_diagnostic && <PanelSectionRow>{status.capture_diagnostic}</PanelSectionRow>}
       {showLogs && status?.log && <PanelSectionRow><div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{status.log}</div></PanelSectionRow>}
     </PanelSection>
